@@ -6,6 +6,7 @@ Memory extraction runs asynchronously after each turn.
 
 from __future__ import annotations
 import asyncio
+import json
 import logging
 from typing import Any
 from uuid import uuid4
@@ -95,6 +96,12 @@ class EverNearPipeline:
             except Exception as e:
                 logger.error(f"Failed to load session context: {e}")
         onboarding_state = profile.get("onboarding_state", {})
+        # Defensive: handle stringified JSON from older signups
+        if isinstance(onboarding_state, str):
+            try:
+                onboarding_state = json.loads(onboarding_state)
+            except (json.JSONDecodeError, TypeError):
+                onboarding_state = {}
         memories = get_user_memories(self.user_id)
 
         # STT already done (text mode) — mark it
