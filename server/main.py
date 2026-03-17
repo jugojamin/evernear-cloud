@@ -62,6 +62,45 @@ async def health():
     }
 
 
+@app.get("/api/runtime-status")
+async def runtime_status():
+    """Runtime health status for Mission Control."""
+    import os, json as _json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    incidents_path = Path(os.environ.get("INCIDENTS_FILE", "/tmp/incidents.json"))
+    entries = []
+    if incidents_path.exists():
+        try:
+            entries = _json.loads(incidents_path.read_text())
+        except Exception:
+            entries = []
+
+    now = datetime.now(timezone.utc)
+    # Consider "incident" if any failure in last 10 minutes
+    recent = [e for e in entries if (now - datetime.fromisoformat(e["ts"])).total_seconds() < 600]
+    # "degraded" if any failure in last hour
+    recent_hour = [e for e in entries if (now - datetime.fromisoformat(e["ts"])).total_seconds() < 3600]
+
+    if recent:
+        status = "incident"
+    elif recent_hour:
+        status = "degraded"
+    else:
+        status = "healthy"
+
+    last_incident = entries[-1] if entries else None
+    return {
+        "status": status,
+        "last_incident_ts": last_incident["ts"] if last_incident else None,
+        "last_error_class": last_incident["error_class"] if last_incident else None,
+        "recent_failures_10m": len(recent),
+        "recent_failures_1h": len(recent_hour),
+        "total_logged": len(entries),
+    }
+
+
 # ─── Auth Endpoints ──────────────────────────────────────
 
 class SignupRequest(BaseModel):

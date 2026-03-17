@@ -8,6 +8,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -132,35 +135,53 @@ class EverNearPipeline:
         # Add user message to history
         history.append({"role": "user", "content": user_text})
 
-        # Call Claude (streaming)
+        # Call Claude (streaming) with 1 retry
         metrics.start_llm()
         full_response = ""
+        _FALLBACK_RESPONSE = "I'm having a little trouble right now — give me just a moment."
+        _MAX_RETRIES = 1
 
         logger.info(f"Calling Claude {routing.model} for user {self.user_id}, input: '{user_text[:50]}'")
-        try:
-            async with asyncio.timeout(30):
-                async with self._anthropic.messages.stream(
-                    model=routing.model,
-                    max_tokens=self._settings.llm_max_tokens,
-                    system=[{
-                        "type": "text",
-                        "text": system_prompt,
-                        "cache_control": {"type": "ephemeral"},  # Enable prompt caching
-                    }],
-                    messages=history,
-                ) as stream:
-                    first_token = True
-                    async for text in stream.text_stream:
-                        if first_token:
-                            metrics.llm_first_token_received()
-                            first_token = False
-                        full_response += text
-        except asyncio.TimeoutError:
-            logger.error(f"Claude API timed out after 30s for {self.user_id}")
-            full_response = "I'm sorry, I'm having a little trouble right now. Could you try again?"
-        except Exception as e:
-            logger.error(f"Claude API error for {self.user_id}: {type(e).__name__}: {e}")
-            full_response = "I'm having a little trouble right now — give me just a moment."
+        last_error = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                full_response = ""
+                async with asyncio.timeout(30):
+                    async with self._anthropic.messages.stream(
+                        model=routing.model,
+                        max_tokens=self._settings.llm_max_tokens,
+                        system=[{
+                            "type": "text",
+                            "text": system_prompt,
+                            "cache_control": {"type": "ephemeral"},
+                        }],
+                        messages=history,
+                    ) as stream:
+                        first_token = True
+                        async for text in stream.text_stream:
+                            if first_token:
+                                metrics.llm_first_token_received()
+                                first_token = False
+                            full_response += text
+                last_error = None
+                break  # success
+            except asyncio.TimeoutError:
+                last_error = "timeout"
+                logger.warning(f"Claude API timeout (attempt {attempt + 1}) for {self.user_id}")
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Claude API error (attempt {attempt + 1}) for {self.user_id}: {type(e).__name__}: {e}")
+
+            if attempt < _MAX_RETRIES:
+                logger.info(f"Retrying Claude API call in 2s for {self.user_id}")
+                await asyncio.sleep(2)
+
+        if last_error is not None:
+            error_class = "timeout" if last_error == "timeout" else type(last_error).__name__
+            logger.error(f"Claude API failed after {_MAX_RETRIES + 1} attempts for {self.user_id}: {error_class}")
+            full_response = _FALLBACK_RESPONSE
+            # Log incident for Mission Control
+            self._log_incident(error_class)
 
         metrics.end_llm()
         logger.info(f"Claude response for {self.user_id}: {len(full_response)} chars in {metrics.llm_total_ms}ms")
@@ -321,6 +342,28 @@ class EverNearPipeline:
             db.table("audit_log").insert(record).execute()
         except Exception as e:
             logger.error(f"Validation log failed: {e}")
+
+    def _log_incident(self, error_class: str):
+        """Append LLM failure to incidents.json for Mission Control."""
+        try:
+            incidents_path = Path(os.environ.get("INCIDENTS_FILE", "/tmp/incidents.json"))
+            entries = []
+            if incidents_path.exists():
+                try:
+                    entries = json.loads(incidents_path.read_text())
+                except (json.JSONDecodeError, OSError):
+                    entries = []
+            entries.append({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "user_id": self.user_id,
+                "error_class": error_class,
+                "agent": "evernear",
+            })
+            # Keep last 20
+            entries = entries[-20:]
+            incidents_path.write_text(json.dumps(entries, indent=2))
+        except Exception as e:
+            logger.error(f"Failed to log incident: {e}")
 
     async def _ensure_conversation(self):
         """Ensure conversation record exists in DB."""
