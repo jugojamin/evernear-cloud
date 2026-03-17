@@ -197,8 +197,7 @@ class ProfileUpdate(BaseModel):
 async def update_profile(update: ProfileUpdate, user_id: str = Depends(require_auth)):
     db = get_service_client()
     data = {k: v for k, v in update.model_dump().items() if v is not None}
-    if "settings" in data:
-        # Supabase JSONB accepts dicts directly — no json.dumps needed
+    # Supabase JSONB accepts dicts directly — no json.dumps needed
     if not data:
         raise HTTPException(400, "No fields to update")
     db.table("users").update(data).eq("id", user_id).execute()
