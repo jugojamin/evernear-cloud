@@ -158,6 +158,9 @@ class EverNearPipeline:
         except asyncio.TimeoutError:
             logger.error(f"Claude API timed out after 30s for {self.user_id}")
             full_response = "I'm sorry, I'm having a little trouble right now. Could you try again?"
+        except Exception as e:
+            logger.error(f"Claude API error for {self.user_id}: {type(e).__name__}: {e}")
+            full_response = "I'm having a little trouble right now — give me just a moment."
 
         metrics.end_llm()
         logger.info(f"Claude response for {self.user_id}: {len(full_response)} chars in {metrics.llm_total_ms}ms")

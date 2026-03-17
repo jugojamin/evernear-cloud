@@ -472,7 +472,12 @@ async def voice_websocket(websocket: WebSocket):
                     continue
 
                 await manager.send_status(user_id, "thinking")
-                response, metrics = await pipeline.process_text_turn(text)
+                try:
+                    response, metrics = await pipeline.process_text_turn(text)
+                except Exception as e:
+                    logger.error(f"Text pipeline error for {user_id}: {e}")
+                    response = "I'm having a little trouble right now — give me just a moment."
+                    metrics = type('M', (), {'to_dict': lambda self: {}})()
 
                 await manager.send_json(user_id, {
                     "type": "transcript",
