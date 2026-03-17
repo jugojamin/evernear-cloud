@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # TTS
     tts_provider: str = "cartesia"  # cartesia | elevenlabs
-    tts_voice_id: str = "9329fbdb-e285-4fba-95ec-592e15f14476"  # Cartesia "Rory - Maternal Vibe" (candidate 8)
+    tts_voice_id: str = "6d287143-8db3-434a-959c-df147192da27"  # Cartesia "Stacy - Mentor" (candidate 9)
 
     # APNs (deferred)
     apns_key_id: str = ""
