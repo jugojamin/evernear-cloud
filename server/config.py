@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     apns_team_id: str = ""
     apns_key_path: str = ""
 
+    # Audio
+    audio_gain: float = 2.0  # PCM gain multiplier for TTS output volume
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8080

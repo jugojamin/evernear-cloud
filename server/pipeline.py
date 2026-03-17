@@ -78,6 +78,9 @@ class EverNearPipeline:
         metrics.start_turn()
         self.turn_count += 1
 
+        # Ensure conversation record exists (prevents FK constraint violations on messages)
+        await self._ensure_conversation()
+
         # Fetch user profile and memories
         profile = await self._get_user_profile()
         user_name = profile.get("preferred_name", "")

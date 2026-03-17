@@ -343,7 +343,7 @@ async def voice_websocket(websocket: WebSocket):
 
             response_text, audio_chunks, metrics = await pipeline.process_voice_turn(transcript)
 
-            # Send transcript for display
+            # LLM succeeded if we got here — send transcript for display
             await manager.send_json(user_id, {
                 "type": "transcript",
                 "text": response_text,
@@ -385,6 +385,8 @@ async def voice_websocket(websocket: WebSocket):
 
         except Exception as e:
             logger.error(f"Voice pipeline error for {user_id}: {e}")
+            # Only fire failure scripts for actual LLM/pipeline errors,
+            # not post-LLM DB writes (which are caught inside _store_message)
             session_failure_count += 1
             script = get_failure_response("llm_error", session_failure_count)
             await _send_failure_as_voice(script)

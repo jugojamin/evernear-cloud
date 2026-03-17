@@ -23,19 +23,23 @@ from server.failure_scripts import get_failure_response
 logger = logging.getLogger(__name__)
 
 
-def resample_24k_to_48k(pcm_24k: bytes) -> bytes:
-    """Upsample PCM16 from 24kHz to 48kHz by duplicating each sample.
+def resample_24k_to_48k(pcm_24k: bytes, gain: float | None = None) -> bytes:
+    """Upsample PCM16 from 24kHz to 48kHz by duplicating each sample, with gain.
 
     Simple and fast — introduces no artifacts for speech audio.
     Input: PCM signed 16-bit LE at 24000 Hz
-    Output: PCM signed 16-bit LE at 48000 Hz (double length)
+    Output: PCM signed 16-bit LE at 48000 Hz (double length), amplified by gain factor
     """
+    if gain is None:
+        gain = get_settings().audio_gain
     sample_count = len(pcm_24k) // 2
     samples = struct.unpack(f"<{sample_count}h", pcm_24k[:sample_count * 2])
     upsampled = []
     for s in samples:
-        upsampled.append(s)
-        upsampled.append(s)
+        amplified = int(s * gain)
+        amplified = max(-32768, min(32767, amplified))  # clamp to int16
+        upsampled.append(amplified)
+        upsampled.append(amplified)
     return struct.pack(f"<{len(upsampled)}h", *upsampled)
 
 
