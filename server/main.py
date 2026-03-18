@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
@@ -28,6 +29,10 @@ from server.transport import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+# Server-level STT degraded flag — set when any user enters degraded mode,
+# cleared when a successful transcript arrives.
+stt_degraded_global = False
 
 
 @asynccontextmanager
@@ -95,6 +100,7 @@ async def runtime_status():
         "recent_failures_10m": len(recent),
         "recent_failures_1h": len(recent_hour),
         "total_logged": len(entries),
+        "stt_degraded": stt_degraded_global,
     }
 
 
@@ -352,16 +358,51 @@ async def voice_websocket(websocket: WebSocket):
     sending_audio = False
     session_failure_count = 0
     transcript_timeout_task = None  # asyncio.Task | None
+    stt_consecutive_failures = 0
+    stt_degraded = False
+    stt_degraded_since = None  # float (time.monotonic) when degraded mode started
+
+    async def _send_nudge_tts(text: str):
+        """Send a short text as TTS audio to the user."""
+        try:
+            from server.audio_bridge import resample_24k_to_48k
+            from server.routers.tts_router import TTSRoutingContext
+            chunks = []
+            async for chunk in pipeline._tts_router.synthesize(
+                text=text, voice_id="", ctx=TTSRoutingContext()
+            ):
+                chunks.append(resample_24k_to_48k(chunk))
+            if chunks:
+                await manager.send_status(user_id, "speaking")
+                for i, chunk in enumerate(chunks):
+                    is_last = (i == len(chunks) - 1)
+                    await manager.send_json(user_id, {
+                        "type": "audio",
+                        "data": base64.b64encode(chunk).decode("ascii"),
+                        "seq": i + 1,
+                        **({"last": True} if is_last else {}),
+                    })
+        except Exception as tts_err:
+            logger.error(f"TTS nudge failed: {tts_err}")
 
     async def _handle_voice_response(transcript: str):
         """Process a final STT transcript through the voice pipeline."""
         nonlocal interrupted, sending_audio, session_failure_count, stt_session
+        nonlocal transcript_timeout_task, stt_consecutive_failures, stt_degraded, stt_degraded_since
+        global stt_degraded_global
         
         # Cancel transcript timeout — we got a response
-        nonlocal transcript_timeout_task
         if transcript_timeout_task:
             transcript_timeout_task.cancel()
             transcript_timeout_task = None
+        
+        # Successful transcript — clear degraded mode and reset counter
+        stt_consecutive_failures = 0
+        if stt_degraded:
+            logger.info(f"STT recovered for {user_id} — exiting degraded mode")
+            stt_degraded = False
+            stt_degraded_since = None
+            stt_degraded_global = False
         
         # Close STT session in background — don't await to avoid RecursionError
         # from Deepgram's async cleanup chain. A fresh session is created on next turn.
@@ -543,6 +584,23 @@ async def voice_websocket(websocket: WebSocket):
                 # Decode base64 PCM and forward to Deepgram
                 audio_data = data.get("data", "")
                 if audio_data:
+                    # Check degraded mode — skip Deepgram, respond immediately
+                    if stt_degraded:
+                        # Check if 2 minutes have passed — allow recovery attempt
+                        if stt_degraded_since and (time.monotonic() - stt_degraded_since) >= 120:
+                            logger.info(f"STT degraded mode recovery attempt for {user_id}")
+                            stt_degraded = False
+                            stt_degraded_since = None
+                            # Fall through to normal STT path for retry
+                        else:
+                            # Still in degraded mode — respond immediately, no Deepgram
+                            if not stt_session:  # only send once per button press (first audio frame)
+                                nudge = "I'm still having trouble with voice right now. Try typing if you can, or give it a few minutes."
+                                await manager.send_json(user_id, {"type": "transcript", "text": nudge, "final": True})
+                                await _send_nudge_tts(nudge)
+                                await manager.send_status(user_id, "listening")
+                            continue
+                    
                     # Create a fresh STT session if none exists (first frame of a new turn)
                     if not stt_session:
                         logger.info(f"Creating new Deepgram session for {user_id} (new turn)")
@@ -570,34 +628,28 @@ async def voice_websocket(websocket: WebSocket):
                     
                     # Start a 10s timeout — if no transcript callback fires, nudge the user
                     async def _transcript_timeout():
+                        nonlocal stt_consecutive_failures, stt_degraded, stt_degraded_since
+                        global stt_degraded_global
                         await asyncio.sleep(10)
                         # If stt_session is still the same (not closed by a transcript callback), it timed out
                         if stt_session is not None:
-                            logger.warning(f"Transcript timeout for {user_id} — no Deepgram response after 10s")
-                            log_incident("stt", "main.py", "Deepgram transcript timeout after 10s", fallback_triggered=True)
-                            nudge = "I didn't quite catch that — could you try again?"
+                            stt_consecutive_failures += 1
+                            logger.warning(f"Transcript timeout for {user_id} — no Deepgram response after 10s (consecutive: {stt_consecutive_failures})")
+                            log_incident("stt", "main.py", f"Deepgram transcript timeout after 10s (consecutive: {stt_consecutive_failures})", fallback_triggered=True)
+                            
+                            if stt_consecutive_failures >= 3 and not stt_degraded:
+                                # Enter degraded mode
+                                stt_degraded = True
+                                stt_degraded_since = time.monotonic()
+                                stt_degraded_global = True
+                                logger.warning(f"STT degraded mode activated for {user_id} after {stt_consecutive_failures} consecutive failures")
+                                log_incident("stt", "main.py", f"STT degraded mode activated after {stt_consecutive_failures} failures", fallback_triggered=True)
+                                nudge = "I'm having trouble hearing right now \u2014 it's not you, it's a technical issue on my end. You can try again in a few minutes, or type to me if you'd like to keep talking."
+                            else:
+                                nudge = "I didn't quite catch that \u2014 could you try again?"
+                            
                             await manager.send_json(user_id, {"type": "transcript", "text": nudge, "final": True})
-                            # Send TTS nudge
-                            try:
-                                from server.audio_bridge import resample_24k_to_48k
-                                from server.routers.tts_router import TTSRoutingContext
-                                chunks = []
-                                async for chunk in pipeline._tts_router.synthesize(
-                                    text=nudge, voice_id="", ctx=TTSRoutingContext()
-                                ):
-                                    chunks.append(resample_24k_to_48k(chunk))
-                                if chunks:
-                                    await manager.send_status(user_id, "speaking")
-                                    for i, chunk in enumerate(chunks):
-                                        is_last = (i == len(chunks) - 1)
-                                        await manager.send_json(user_id, {
-                                            "type": "audio",
-                                            "data": base64.b64encode(chunk).decode("ascii"),
-                                            "seq": i + 1,
-                                            **({"last": True} if is_last else {}),
-                                        })
-                            except Exception as tts_err:
-                                logger.error(f"TTS for transcript timeout nudge failed: {tts_err}")
+                            await _send_nudge_tts(nudge)
                             await manager.send_status(user_id, "listening")
                     
                     # Cancel any previous timeout task and start a new one
