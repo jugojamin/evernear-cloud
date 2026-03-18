@@ -8,9 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -26,6 +23,7 @@ from server.failure_scripts import get_failure_response
 from server.routers.llm_router import route_llm, RoutingDecision
 from server.routers.tts_router import CartesiaTTSProvider, TTSRouter, TTSRoutingContext
 from server.validator import ResponseValidator, SessionContext, ValidationAction
+from server.incident_log import log_incident
 from server.db.client import get_service_client
 
 logger = logging.getLogger(__name__)
@@ -181,7 +179,7 @@ class EverNearPipeline:
             logger.error(f"Claude API failed after {_MAX_RETRIES + 1} attempts for {self.user_id}: {error_class}")
             full_response = _FALLBACK_RESPONSE
             # Log incident for Mission Control
-            self._log_incident(error_class)
+            log_incident("llm", "pipeline.py", f"Claude API {error_class} after {_MAX_RETRIES + 1} attempts", fallback_triggered=True)
 
         metrics.end_llm()
         logger.info(f"Claude response for {self.user_id}: {len(full_response)} chars in {metrics.llm_total_ms}ms")
@@ -204,6 +202,7 @@ class EverNearPipeline:
         except Exception as e:
             # Fail closed — block the response
             logger.error(f"Validator failed: {e}")
+            log_incident("validator", "pipeline.py", f"Validator failed: {e}", fallback_triggered=True)
             full_response = ResponseValidator.UNIVERSAL_FALLBACK
 
         # Update conversation history
@@ -260,6 +259,7 @@ class EverNearPipeline:
 
         except Exception as e:
             logger.error(f"TTS failed: {e}")
+            log_incident("tts", "pipeline.py", f"TTS failed: {e}", fallback_triggered=False)
             # TTS failure — return text only (Safety Architecture Rule #6)
             # audio_chunks stays empty, caller sends transcript only
 
@@ -283,6 +283,7 @@ class EverNearPipeline:
             return result.data[0]["id"] if result.data else None
         except Exception as e:
             logger.error(f"Failed to store message: {e}")
+            log_incident("db", "pipeline.py", f"Failed to store message: {e}", fallback_triggered=False)
             return None
 
     async def _extract_memories(
@@ -302,6 +303,7 @@ class EverNearPipeline:
                     logger.error(f"Memory cache refresh failed: {e}")
         except Exception as e:
             logger.error(f"Background memory extraction failed: {e}")
+            log_incident("db", "pipeline.py", f"Memory extraction failed: {e}", fallback_triggered=False)
 
     async def _get_caregiver_name(self) -> str:
         """Fetch primary caregiver display name for this user."""
@@ -342,28 +344,7 @@ class EverNearPipeline:
             db.table("audit_log").insert(record).execute()
         except Exception as e:
             logger.error(f"Validation log failed: {e}")
-
-    def _log_incident(self, error_class: str):
-        """Append LLM failure to incidents.json for Mission Control."""
-        try:
-            incidents_path = Path(os.environ.get("INCIDENTS_FILE", "/tmp/incidents.json"))
-            entries = []
-            if incidents_path.exists():
-                try:
-                    entries = json.loads(incidents_path.read_text())
-                except (json.JSONDecodeError, OSError):
-                    entries = []
-            entries.append({
-                "ts": datetime.now(timezone.utc).isoformat(),
-                "user_id": self.user_id,
-                "error_class": error_class,
-                "agent": "evernear",
-            })
-            # Keep last 20
-            entries = entries[-20:]
-            incidents_path.write_text(json.dumps(entries, indent=2))
-        except Exception as e:
-            logger.error(f"Failed to log incident: {e}")
+            log_incident("db", "pipeline.py", f"Validation log failed: {e}", fallback_triggered=False)
 
     async def _ensure_conversation(self):
         """Ensure conversation record exists in DB."""
@@ -376,3 +357,4 @@ class EverNearPipeline:
             }).execute()
         except Exception as e:
             logger.error(f"Failed to upsert conversation: {e}")
+            log_incident("db", "pipeline.py", f"Failed to upsert conversation: {e}", fallback_triggered=False)

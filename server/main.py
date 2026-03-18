@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from server.audio_bridge import DeepgramSTTSession
 from server.auth import require_auth, authenticate_websocket
 from server.config import get_settings
+from server.incident_log import log_incident, read_incidents
 from server.db.client import get_service_client
 from server.failure_scripts import get_failure_response
 from server.metrics import TurnMetrics
@@ -65,23 +66,16 @@ async def health():
 @app.get("/api/runtime-status")
 async def runtime_status():
     """Runtime health status for Mission Control."""
-    import os, json as _json
-    from datetime import datetime, timezone
-    from pathlib import Path
+    from datetime import timezone as _tz
 
-    incidents_path = Path(os.environ.get("INCIDENTS_FILE", "/tmp/incidents.json"))
-    entries = []
-    if incidents_path.exists():
-        try:
-            entries = _json.loads(incidents_path.read_text())
-        except Exception:
-            entries = []
+    entries = read_incidents()
+    now = datetime.now(_tz.utc)
 
-    now = datetime.now(timezone.utc)
-    # Consider "incident" if any failure in last 10 minutes
-    recent = [e for e in entries if (now - datetime.fromisoformat(e["ts"])).total_seconds() < 600]
-    # "degraded" if any failure in last hour
-    recent_hour = [e for e in entries if (now - datetime.fromisoformat(e["ts"])).total_seconds() < 3600]
+    def _age(e):
+        return (now - datetime.fromisoformat(e["ts"])).total_seconds()
+
+    recent = [e for e in entries if _age(e) < 600]
+    recent_hour = [e for e in entries if _age(e) < 3600]
 
     if recent:
         status = "incident"
@@ -90,11 +84,14 @@ async def runtime_status():
     else:
         status = "healthy"
 
-    last_incident = entries[-1] if entries else None
+    last = entries[-1] if entries else None
     return {
         "status": status,
-        "last_incident_ts": last_incident["ts"] if last_incident else None,
-        "last_error_class": last_incident["error_class"] if last_incident else None,
+        "last_incident_ts": last["ts"] if last else None,
+        "last_error_type": last.get("error_type") if last else None,
+        "last_incident_id": last.get("incident_id") if last else None,
+        "last_fallback_triggered": last.get("fallback_triggered") if last else None,
+        "last_short_message": last.get("short_message") if last else None,
         "recent_failures_10m": len(recent),
         "recent_failures_1h": len(recent_hour),
         "total_logged": len(entries),
@@ -423,6 +420,7 @@ async def voice_websocket(websocket: WebSocket):
 
         except Exception as e:
             logger.error(f"Voice pipeline error for {user_id}: {e}")
+            log_incident("transport", "main.py", f"Voice pipeline error: {e}", fallback_triggered=True)
             # Only fire failure scripts for actual LLM/pipeline errors,
             # not post-LLM DB writes (which are caught inside _store_message)
             session_failure_count += 1
@@ -485,6 +483,12 @@ async def voice_websocket(websocket: WebSocket):
 
         except Exception as e:
             logger.error(f"Failed to send failure script: {e}")
+            log_incident("transport", "main.py", f"Failed to send failure script: {e}", fallback_triggered=False)
+            # LAST RESORT: try bare transcript send
+            try:
+                await manager.send_json(user_id, {"type": "transcript", "text": "I'm here — just give me a moment.", "final": True})
+            except Exception:
+                pass  # WebSocket is truly dead — nothing more we can do
 
         interrupted = False
         await manager.send_status(user_id, "listening")
@@ -515,6 +519,7 @@ async def voice_websocket(websocket: WebSocket):
                     response, metrics = await pipeline.process_text_turn(text)
                 except Exception as e:
                     logger.error(f"Text pipeline error for {user_id}: {e}")
+                    log_incident("transport", "main.py", f"Text pipeline error: {e}", fallback_triggered=True)
                     response = "I'm having a little trouble right now — give me just a moment."
                     metrics = type('M', (), {'to_dict': lambda self: {}})()
 
