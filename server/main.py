@@ -601,7 +601,6 @@ async def voice_websocket(websocket: WebSocket):
                             await manager.send_status(user_id, "listening")
                     
                     # Cancel any previous timeout task and start a new one
-                    nonlocal transcript_timeout_task
                     if transcript_timeout_task:
                         transcript_timeout_task.cancel()
                     transcript_timeout_task = asyncio.create_task(_transcript_timeout())
