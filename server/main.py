@@ -98,13 +98,6 @@ async def runtime_status():
     }
 
 
-# TEMPORARY — remove after WO-2026-017-C verification
-@app.get("/api/test-incident")
-async def test_incident():
-    """Fire a controlled test incident for MC verification. REMOVE AFTER USE."""
-    inc_id = log_incident("test", "main.py", "Controlled test incident", fallback_triggered=True)
-    return {"incident_id": inc_id, "status": "logged"}
-
 
 # ─── Auth Endpoints ──────────────────────────────────────
 
