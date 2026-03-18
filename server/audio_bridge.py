@@ -108,7 +108,11 @@ class DeepgramSTTSession:
                 return False
 
             self._started = True
-            logger.info(f"Deepgram async STT session started — is_connected={self._connection.is_connected}")
+            try:
+                conn_status = self._connection.is_connected
+            except Exception:
+                conn_status = "unknown"
+            logger.info(f"Deepgram async STT session started — is_connected={conn_status}")
             return True
 
         except Exception as e:
@@ -194,6 +198,7 @@ class DeepgramSTTSession:
         if self._connection and self._started:
             try:
                 await self._connection.finalize()
+                logger.info("Deepgram finalize() sent — awaiting transcript")
             except Exception as e:
                 logger.error(f"Failed to finalize Deepgram stream: {e}")
 

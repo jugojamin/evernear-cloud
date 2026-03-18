@@ -351,10 +351,17 @@ async def voice_websocket(websocket: WebSocket):
     interrupted = False
     sending_audio = False
     session_failure_count = 0
+    transcript_timeout_task: asyncio.Task | None = None
 
     async def _handle_voice_response(transcript: str):
         """Process a final STT transcript through the voice pipeline."""
         nonlocal interrupted, sending_audio, session_failure_count, stt_session
+        
+        # Cancel transcript timeout — we got a response
+        nonlocal transcript_timeout_task
+        if transcript_timeout_task:
+            transcript_timeout_task.cancel()
+            transcript_timeout_task = None
         
         # Close STT session in background — don't await to avoid RecursionError
         # from Deepgram's async cleanup chain. A fresh session is created on next turn.
@@ -558,7 +565,46 @@ async def voice_websocket(websocket: WebSocket):
             elif msg_type == "end_of_speech":
                 # User stopped talking — request final transcript
                 if stt_session and stt_session.is_alive:
+                    logger.info(f"end_of_speech received for {user_id} — calling finalize()")
                     await stt_session.finalize()
+                    
+                    # Start a 10s timeout — if no transcript callback fires, nudge the user
+                    async def _transcript_timeout():
+                        await asyncio.sleep(10)
+                        # If stt_session is still the same (not closed by a transcript callback), it timed out
+                        if stt_session is not None:
+                            logger.warning(f"Transcript timeout for {user_id} — no Deepgram response after 10s")
+                            log_incident("stt", "main.py", "Deepgram transcript timeout after 10s", fallback_triggered=True)
+                            nudge = "I didn't quite catch that — could you try again?"
+                            await manager.send_json(user_id, {"type": "transcript", "text": nudge, "final": True})
+                            # Send TTS nudge
+                            try:
+                                from server.audio_bridge import resample_24k_to_48k
+                                from server.routers.tts_router import TTSRoutingContext
+                                chunks = []
+                                async for chunk in pipeline._tts_router.synthesize(
+                                    text=nudge, voice_id="", ctx=TTSRoutingContext()
+                                ):
+                                    chunks.append(resample_24k_to_48k(chunk))
+                                if chunks:
+                                    await manager.send_status(user_id, "speaking")
+                                    for i, chunk in enumerate(chunks):
+                                        is_last = (i == len(chunks) - 1)
+                                        await manager.send_json(user_id, {
+                                            "type": "audio",
+                                            "data": base64.b64encode(chunk).decode("ascii"),
+                                            "seq": i + 1,
+                                            **({"last": True} if is_last else {}),
+                                        })
+                            except Exception as tts_err:
+                                logger.error(f"TTS for transcript timeout nudge failed: {tts_err}")
+                            await manager.send_status(user_id, "listening")
+                    
+                    # Cancel any previous timeout task and start a new one
+                    nonlocal transcript_timeout_task
+                    if transcript_timeout_task:
+                        transcript_timeout_task.cancel()
+                    transcript_timeout_task = asyncio.create_task(_transcript_timeout())
                 else:
                     logger.warning(f"end_of_speech but STT session dead for {user_id}")
 
