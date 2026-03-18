@@ -67,11 +67,25 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
+    from fastapi.responses import JSONResponse
+
+    deps = {
+        "llm": "degraded" if llm_degraded_global else "ok",
+        "stt": "degraded" if stt_degraded_global else "ok",
+        "tts": "degraded" if tts_degraded_global else "ok",
+    }
+    degraded_list = [k for k, v in deps.items() if v == "degraded"]
+    all_degraded = len(degraded_list) == 3
+    status = "degraded" if degraded_list else "ok"
+
+    body = {
+        "status": status,
         "service": "evernear-api",
         "active_connections": manager.active_connections,
+        "dependencies": deps,
+        "degraded": degraded_list,
     }
+    return JSONResponse(content=body, status_code=503 if all_degraded else 200)
 
 
 @app.get("/api/runtime-status")
