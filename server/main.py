@@ -425,6 +425,7 @@ async def voice_websocket(websocket: WebSocket):
     stt_consecutive_failures = 0
     stt_degraded = False
     stt_degraded_since = None  # float (time.monotonic) when degraded mode started
+    audio_frame_count = 0
 
     async def _send_nudge_tts(text: str):
         """Send a short text as TTS audio to the user."""
@@ -679,7 +680,9 @@ async def voice_websocket(websocket: WebSocket):
                     if stt_session:
                         try:
                             pcm_bytes = base64.b64decode(audio_data)
-                            logger.info(f"Received audio frame from {user_id}, pcm_bytes={len(pcm_bytes)}")
+                            audio_frame_count += 1
+                            if audio_frame_count == 1:
+                                logger.info(f"Audio stream started for {user_id}, first frame: {len(pcm_bytes)} bytes")
                             await stt_session.send_audio(pcm_bytes)
                         except Exception as e:
                             logger.error(f"Audio decode/forward error for {user_id}: {e}")
@@ -687,7 +690,8 @@ async def voice_websocket(websocket: WebSocket):
             elif msg_type == "end_of_speech":
                 # User stopped talking — request final transcript
                 if stt_session and stt_session.is_alive:
-                    logger.info(f"end_of_speech received for {user_id} — calling finalize()")
+                    logger.info(f"end_of_speech received for {user_id} — {audio_frame_count} frames forwarded, calling finalize()")
+                    audio_frame_count = 0
                     await stt_session.finalize()
                     
                     # Start a 10s timeout — if no transcript callback fires, nudge the user

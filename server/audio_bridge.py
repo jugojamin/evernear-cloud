@@ -188,7 +188,6 @@ class DeepgramSTTSession:
         if self._connection and self._started:
             try:
                 await self._connection.send(pcm_bytes)
-                logger.info(f"Forwarded {len(pcm_bytes)} bytes to Deepgram")
             except Exception as e:
                 logger.error(f"Failed to send audio to Deepgram: {e}")
                 self._started = False
