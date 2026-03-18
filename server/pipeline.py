@@ -11,6 +11,7 @@ import logging
 from typing import Any
 from uuid import uuid4
 
+import time
 import anthropic
 
 from server.config import get_settings
@@ -137,7 +138,24 @@ class EverNearPipeline:
         metrics.start_llm()
         full_response = ""
         _FALLBACK_RESPONSE = "I'm having a little trouble right now — give me just a moment."
+        _LLM_DEGRADED_MSG = "I'm having a little trouble thinking clearly right now — it's a temporary issue on my end, not anything you did. Give me a few minutes and try again."
         _MAX_RETRIES = 1
+
+        # Check LLM degraded mode
+        from server.main import llm_degraded_global, llm_degraded_since, llm_consecutive_failures
+        import server.main as _main_mod
+
+        if _main_mod.llm_degraded_global:
+            # Check if 2 minutes have passed — allow recovery
+            if _main_mod.llm_degraded_since and (time.monotonic() - _main_mod.llm_degraded_since) >= 120:
+                logger.info(f"LLM degraded mode recovery attempt for {self.user_id}")
+                _main_mod.llm_degraded_global = False
+                _main_mod.llm_degraded_since = None
+                # Fall through to normal LLM call
+            else:
+                logger.warning(f"LLM degraded — skipping Claude call for {self.user_id}")
+                metrics.end_llm()
+                return _LLM_DEGRADED_MSG, metrics
 
         logger.info(f"Calling Claude {routing.model} for user {self.user_id}, input: '{user_text[:50]}'")
         last_error = None
@@ -162,6 +180,12 @@ class EverNearPipeline:
                                 first_token = False
                             full_response += text
                 last_error = None
+                # LLM succeeded — reset degraded tracking
+                _main_mod.llm_consecutive_failures = 0
+                if _main_mod.llm_degraded_global:
+                    logger.info(f"LLM recovered for {self.user_id} — exiting degraded mode")
+                    _main_mod.llm_degraded_global = False
+                    _main_mod.llm_degraded_since = None
                 break  # success
             except asyncio.TimeoutError:
                 last_error = "timeout"
@@ -180,6 +204,14 @@ class EverNearPipeline:
             full_response = _FALLBACK_RESPONSE
             # Log incident for Mission Control
             log_incident("llm", "pipeline.py", f"Claude API {error_class} after {_MAX_RETRIES + 1} attempts", fallback_triggered=True)
+            # Track consecutive LLM failures for degraded mode
+            _main_mod.llm_consecutive_failures += 1
+            if _main_mod.llm_consecutive_failures >= 3 and not _main_mod.llm_degraded_global:
+                _main_mod.llm_degraded_global = True
+                _main_mod.llm_degraded_since = time.monotonic()
+                logger.warning(f"LLM degraded mode activated after {_main_mod.llm_consecutive_failures} consecutive failures")
+                log_incident("llm", "pipeline.py", f"LLM degraded mode activated after {_main_mod.llm_consecutive_failures} failures", fallback_triggered=True)
+                full_response = _LLM_DEGRADED_MSG
 
         metrics.end_llm()
         logger.info(f"Claude response for {self.user_id}: {len(full_response)} chars in {metrics.llm_total_ms}ms")

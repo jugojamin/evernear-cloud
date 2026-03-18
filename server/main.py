@@ -30,9 +30,12 @@ from server.transport import manager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-# Server-level STT degraded flag — set when any user enters degraded mode,
-# cleared when a successful transcript arrives.
+# Server-level degraded flags — set when any user enters degraded mode,
+# cleared when a successful response arrives.
 stt_degraded_global = False
+llm_degraded_global = False
+llm_consecutive_failures = 0
+llm_degraded_since = None  # float (time.monotonic) when degraded mode started
 
 
 @asynccontextmanager
@@ -133,6 +136,7 @@ async def runtime_status():
         "recent_failures_1h": len(recent_hour),
         "total_logged": len(entries),
         "stt_degraded": stt_degraded_global,
+        "llm_degraded": llm_degraded_global,
         "recent_incidents": recent_incidents,
         "dependencies": dependencies,
     }
