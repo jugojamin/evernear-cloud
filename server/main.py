@@ -139,6 +139,14 @@ async def runtime_status():
 
 
 
+@app.get("/api/incidents")
+async def incidents_api():
+    """Incident history for governance automation. Read-only."""
+    entries = read_incidents()
+    recent = list(reversed(entries[-10:]))
+    return {"incidents": recent, "total": len(entries)}
+
+
 # ─── Auth Endpoints ──────────────────────────────────────
 
 class SignupRequest(BaseModel):
