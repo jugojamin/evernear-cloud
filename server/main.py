@@ -742,6 +742,12 @@ async def voice_websocket(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error for {user_id}: {e}")
     finally:
+        logger.info(f"Session cleanup for {user_id}: stt={'open' if stt_session else 'closed'}, pending_timeout={transcript_timeout_task is not None}, frames={audio_frame_count}")
+        if transcript_timeout_task:
+            transcript_timeout_task.cancel()
+            transcript_timeout_task = None
         if stt_session:
             await stt_session.close()
+            stt_session = None
+        audio_frame_count = 0
         manager.disconnect(user_id)
