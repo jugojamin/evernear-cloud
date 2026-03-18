@@ -351,7 +351,7 @@ async def voice_websocket(websocket: WebSocket):
     interrupted = False
     sending_audio = False
     session_failure_count = 0
-    transcript_timeout_task: asyncio.Task | None = None
+    transcript_timeout_task = None  # asyncio.Task | None
 
     async def _handle_voice_response(transcript: str):
         """Process a final STT transcript through the voice pipeline."""
