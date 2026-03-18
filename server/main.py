@@ -36,6 +36,9 @@ stt_degraded_global = False
 llm_degraded_global = False
 llm_consecutive_failures = 0
 llm_degraded_since = None  # float (time.monotonic) when degraded mode started
+tts_degraded_global = False
+tts_consecutive_failures = 0
+tts_degraded_since = None
 
 
 @asynccontextmanager
@@ -137,6 +140,7 @@ async def runtime_status():
         "total_logged": len(entries),
         "stt_degraded": stt_degraded_global,
         "llm_degraded": llm_degraded_global,
+        "tts_degraded": tts_degraded_global,
         "recent_incidents": recent_incidents,
         "dependencies": dependencies,
     }

@@ -263,11 +263,26 @@ class EverNearPipeline:
         Returns (response_text, audio_chunks_48k, metrics).
         Audio chunks are PCM16 at 48kHz for iOS playback.
         """
+        import server.main as _main_mod
+
         # Run the text pipeline (includes LLM + validator)
         response_text, metrics = await self.process_text_turn(user_text)
 
         # Synthesize TTS
         audio_chunks: list[bytes] = []
+
+        # Check TTS degraded mode
+        if _main_mod.tts_degraded_global:
+            if _main_mod.tts_degraded_since and (time.monotonic() - _main_mod.tts_degraded_since) >= 120:
+                logger.info(f"TTS degraded mode recovery attempt for {self.user_id}")
+                _main_mod.tts_degraded_global = False
+                _main_mod.tts_degraded_since = None
+                # Fall through to normal TTS
+            else:
+                logger.warning(f"TTS degraded — skipping synthesis for {self.user_id}")
+                response_text = "I can't speak right now due to a technical issue, but I can still read your messages. Here's my response as text.\n\n" + response_text
+                return response_text, audio_chunks, metrics
+
         try:
             metrics.start_tts()
             voice_id = self._settings.tts_provider  # placeholder — voice selection is next task
@@ -289,9 +304,23 @@ class EverNearPipeline:
                 chunk_48k = resample_24k_to_48k(chunk)
                 audio_chunks.append(chunk_48k)
 
+            # TTS succeeded — reset counter
+            _main_mod.tts_consecutive_failures = 0
+            if _main_mod.tts_degraded_global:
+                logger.info(f"TTS recovered for {self.user_id} — exiting degraded mode")
+                _main_mod.tts_degraded_global = False
+                _main_mod.tts_degraded_since = None
+
         except Exception as e:
             logger.error(f"TTS failed: {e}")
             log_incident("tts", "pipeline.py", f"TTS failed: {e}", fallback_triggered=False)
+            # Track consecutive TTS failures for degraded mode
+            _main_mod.tts_consecutive_failures += 1
+            if _main_mod.tts_consecutive_failures >= 3 and not _main_mod.tts_degraded_global:
+                _main_mod.tts_degraded_global = True
+                _main_mod.tts_degraded_since = time.monotonic()
+                logger.warning(f"TTS degraded mode activated after {_main_mod.tts_consecutive_failures} consecutive failures")
+                log_incident("tts", "pipeline.py", f"TTS degraded mode activated after {_main_mod.tts_consecutive_failures} failures", fallback_triggered=True)
             # TTS failure — return text only (Safety Architecture Rule #6)
             # audio_chunks stays empty, caller sends transcript only
 
