@@ -415,6 +415,7 @@ async def voice_websocket(websocket: WebSocket):
 
     session = await manager.connect(websocket, user_id)
     pipeline = EverNearPipeline(user_id=user_id)
+    logger.info(f"Session state for {user_id}: llm_degraded={llm_degraded_global}, stt_degraded={stt_degraded_global}, tts_degraded={tts_degraded_global}")
 
     # Audio state
     stt_session: DeepgramSTTSession | None = None
