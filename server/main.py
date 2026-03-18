@@ -90,6 +90,38 @@ async def runtime_status():
         status = "healthy"
 
     last = entries[-1] if entries else None
+
+    # Recent incidents (last 5, newest first)
+    recent_incidents = [
+        {
+            "incident_id": e.get("incident_id"),
+            "ts": e.get("ts"),
+            "error_type": e.get("error_type"),
+            "short_message": e.get("short_message"),
+            "fallback_triggered": e.get("fallback_triggered"),
+        }
+        for e in reversed(entries[-5:])
+    ]
+
+    # Dependency health indicators
+    def _dep_status(error_type: str) -> dict:
+        dep_incidents = [e for e in entries if e.get("error_type") == error_type]
+        dep_recent = [e for e in dep_incidents if _age(e) < 600]
+        last_dep = dep_incidents[-1] if dep_incidents else None
+        return {
+            "status": "degraded" if dep_recent else "healthy",
+            "last_failure": last_dep["ts"] if last_dep else None,
+        }
+
+    dependencies = {
+        "llm": _dep_status("llm"),
+        "stt": {
+            "status": "degraded" if stt_degraded_global else _dep_status("stt")["status"],
+            "last_failure": _dep_status("stt")["last_failure"],
+        },
+        "tts": _dep_status("tts"),
+    }
+
     return {
         "status": status,
         "last_incident_ts": last["ts"] if last else None,
@@ -101,6 +133,8 @@ async def runtime_status():
         "recent_failures_1h": len(recent_hour),
         "total_logged": len(entries),
         "stt_degraded": stt_degraded_global,
+        "recent_incidents": recent_incidents,
+        "dependencies": dependencies,
     }
 
 
