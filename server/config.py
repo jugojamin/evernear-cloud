@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     anthropic_sonnet_output_per_1k: float = 0.015  # Sonnet output
     cartesia_per_character: float = 0.000060     # Sonic-2 per character
 
+    # Rate limiting
+    max_connections_per_user: int = 2
+    max_messages_per_minute: int = 10
+    max_global_connections: int = 50
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8080

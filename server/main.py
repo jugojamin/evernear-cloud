@@ -525,13 +525,49 @@ async def delete_user_data(user_id: str = Depends(require_auth)):
 
 # ─── WebSocket Voice Endpoint ────────────────────────────
 
+# ─── Rate Limiting ────────────────────────────────────────
+
+import time as _time
+
+_message_timestamps: dict[str, list[float]] = {}  # user_id -> list of timestamps
+
+
+def _check_message_rate(user_id: str, limit: int) -> bool:
+    """Return True if user is within rate limit, False if exceeded."""
+    now = _time.time()
+    window = 60.0
+    timestamps = _message_timestamps.get(user_id, [])
+    timestamps = [t for t in timestamps if now - t < window]
+    if len(timestamps) >= limit:
+        _message_timestamps[user_id] = timestamps
+        return False
+    timestamps.append(now)
+    _message_timestamps[user_id] = timestamps
+    return True
+
+
 @app.websocket("/ws/voice")
 async def voice_websocket(websocket: WebSocket):
     """Main voice conversation WebSocket endpoint."""
+    settings = get_settings()
     user_id = await authenticate_websocket(websocket)
     if not user_id:
         await websocket.accept()
         await websocket.close(code=4001, reason="Authentication required")
+        return
+
+    # Global connection limit
+    if manager.active_connections >= settings.max_global_connections:
+        await websocket.accept()
+        logger.warning(f"Global rate limit: {manager.active_connections} active connections, rejecting new")
+        await websocket.close(code=4503, reason="Service busy")
+        return
+
+    # Per-user connection limit
+    if manager.user_connection_count(user_id) >= settings.max_connections_per_user:
+        await websocket.accept()
+        logger.warning(f"Rate limit: user {user_id} rejected — {manager.user_connection_count(user_id)} active connections")
+        await websocket.close(code=4429, reason="Too many connections")
         return
 
     session = await manager.connect(websocket, user_id)
@@ -733,6 +769,17 @@ async def voice_websocket(websocket: WebSocket):
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type", "")
+
+            # Per-user message rate limiting (skip for audio frames — only count actions)
+            if msg_type in ("session_start", "text", "end_of_speech", "button_press"):
+                if not _check_message_rate(user_id, settings.max_messages_per_minute):
+                    logger.warning(f"Rate limit: user {user_id} exceeded {settings.max_messages_per_minute} messages/min")
+                    await manager.send_json(user_id, {
+                        "type": "transcript",
+                        "text": "I need a moment to catch up — try again in a few seconds.",
+                        "final": True,
+                    })
+                    continue
 
             if msg_type == "session_start":
                 # Start Deepgram STT session

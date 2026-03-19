@@ -22,10 +22,14 @@ class VoiceSession:
 
 
 class ConnectionManager:
-    """Manages per-user WebSocket connections."""
+    """Manages per-user WebSocket connections with rate limiting."""
 
     def __init__(self):
         self._sessions: dict[str, VoiceSession] = {}
+        self._user_connections: dict[str, int] = {}  # user_id -> active count
+
+    def user_connection_count(self, user_id: str) -> int:
+        return self._user_connections.get(user_id, 0)
 
     async def connect(self, websocket: WebSocket, user_id: str) -> VoiceSession:
         """Accept and register a new WebSocket connection."""
@@ -38,9 +42,11 @@ class ConnectionManager:
                 await old.websocket.close(code=1000, reason="New session started")
             except Exception:
                 pass
+            # Count stays — will be reused by new session
         session = VoiceSession(user_id=user_id, websocket=websocket)
         self._sessions[user_id] = session
-        logger.info(f"User {user_id} connected via WebSocket")
+        self._user_connections[user_id] = self._user_connections.get(user_id, 0) + 1
+        logger.info(f"User {user_id} connected via WebSocket (connections: {self._user_connections[user_id]})")
         return session
 
     def disconnect(self, user_id: str):
@@ -48,7 +54,12 @@ class ConnectionManager:
         session = self._sessions.pop(user_id, None)
         if session:
             session.connected = False
-            logger.info(f"User {user_id} disconnected")
+            count = self._user_connections.get(user_id, 1) - 1
+            if count <= 0:
+                self._user_connections.pop(user_id, None)
+            else:
+                self._user_connections[user_id] = count
+            logger.info(f"User {user_id} disconnected (connections: {max(count, 0)})")
 
     def get_session(self, user_id: str) -> VoiceSession | None:
         return self._sessions.get(user_id)
