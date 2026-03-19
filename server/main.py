@@ -290,6 +290,117 @@ async def unit_economics(user_id: str | None = None, days: int | None = None):
     }
 
 
+# ─── Usage Analytics ─────────────────────────────────────
+
+@app.get("/api/analytics")
+async def analytics(days: int | None = None):
+    """Usage analytics from conversations, messages, and audit_log. Read-only."""
+    from datetime import timezone as _tz, timedelta
+    db = get_service_client()
+    now = datetime.now(_tz.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    week_ago = (now - timedelta(days=7)).isoformat()
+    month_ago = (now - timedelta(days=30)).isoformat()
+    since = (now - timedelta(days=days)).isoformat() if days else None
+
+    try:
+        # Conversations
+        cq = db.table("conversations").select("id, user_id, started_at, turn_count")
+        if since:
+            cq = cq.gte("started_at", since)
+        convos = (cq.execute()).data or []
+
+        # Messages
+        mq = db.table("messages").select("id, role, created_at, conversation_id")
+        if since:
+            mq = mq.gte("created_at", since)
+        msgs = (mq.execute()).data or []
+
+        # Audit log (safety interventions)
+        aq = db.table("audit_log").select("id, created_at").eq("action", "response_validation")
+        if since:
+            aq = aq.gte("created_at", since)
+        audits = (aq.execute()).data or []
+
+    except Exception as e:
+        logger.error(f"Analytics query failed: {e}")
+        return {"error": "query_failed", "detail": str(e)}
+
+    # Distinct users
+    all_user_ids = set(c["user_id"] for c in convos if c.get("user_id"))
+    today_users = set(c["user_id"] for c in convos if c.get("started_at", "") >= today_start)
+    week_users = set(c["user_id"] for c in convos if c.get("started_at", "") >= week_ago)
+    month_users = set(c["user_id"] for c in convos if c.get("started_at", "") >= month_ago)
+
+    # Conversation stats
+    today_convos = [c for c in convos if c.get("started_at", "") >= today_start]
+    week_convos = [c for c in convos if c.get("started_at", "") >= week_ago]
+    month_convos = [c for c in convos if c.get("started_at", "") >= month_ago]
+    turn_counts = [c.get("turn_count", 0) or 0 for c in convos]
+    avg_turns = round(sum(turn_counts) / len(turn_counts), 1) if turn_counts else 0.0
+
+    # Avg duration: from started_at to last message created_at per conversation
+    convo_ids = {c["id"] for c in convos}
+    msg_by_convo: dict[str, list[str]] = {}
+    for m in msgs:
+        cid = m.get("conversation_id")
+        if cid in convo_ids:
+            msg_by_convo.setdefault(cid, []).append(m.get("created_at", ""))
+
+    durations = []
+    for c in convos:
+        started = c.get("started_at", "")
+        last_msgs = msg_by_convo.get(c["id"], [])
+        if started and last_msgs:
+            last_msg = max(last_msgs)
+            try:
+                from datetime import datetime as _dt
+                s = _dt.fromisoformat(started)
+                e = _dt.fromisoformat(last_msg)
+                dur_min = (e - s).total_seconds() / 60.0
+                if dur_min >= 0:
+                    durations.append(dur_min)
+            except Exception:
+                pass
+    avg_duration = round(sum(durations) / len(durations), 1) if durations else 0.0
+
+    # Messages
+    user_msgs = [m for m in msgs if m.get("role") == "user"]
+    asst_msgs = [m for m in msgs if m.get("role") == "assistant"]
+    today_msgs = [m for m in msgs if m.get("created_at", "") >= today_start]
+
+    # Safety
+    week_audits = [a for a in audits if a.get("created_at", "") >= week_ago]
+
+    return {
+        "period": f"last_{days}d" if days else "all",
+        "users": {
+            "total": len(all_user_ids),
+            "active_today": len(today_users),
+            "active_7d": len(week_users),
+            "active_30d": len(month_users),
+        },
+        "conversations": {
+            "total": len(convos),
+            "today": len(today_convos),
+            "last_7d": len(week_convos),
+            "last_30d": len(month_convos),
+            "avg_turns": avg_turns,
+            "avg_duration_minutes": avg_duration,
+        },
+        "messages": {
+            "total": len(msgs),
+            "user_messages": len(user_msgs),
+            "assistant_messages": len(asst_msgs),
+            "today": len(today_msgs),
+        },
+        "safety": {
+            "total_interventions": len(audits),
+            "last_7d": len(week_audits),
+        },
+    }
+
+
 # ─── Auth Endpoints ──────────────────────────────────────
 
 class SignupRequest(BaseModel):
