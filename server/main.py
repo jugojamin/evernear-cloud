@@ -169,6 +169,127 @@ async def incidents_api():
     return {"incidents": recent, "total": len(entries)}
 
 
+# ─── Unit Economics ───────────────────────────────────────
+
+@app.get("/api/unit-economics")
+async def unit_economics(user_id: str | None = None, days: int | None = None):
+    """Compute per-turn / per-conversation cost estimates from stored messages."""
+    from datetime import timezone as _tz, timedelta
+    settings = get_settings()
+    db = get_service_client()
+
+    # Build query — fetch messages joined with conversation user_id
+    q = db.table("messages").select(
+        "id, conversation_id, role, content, metrics, audio_duration_ms, created_at, "
+        "conversations!inner(user_id, started_at)"
+    )
+    if user_id:
+        q = q.eq("conversations.user_id", user_id)
+    if days:
+        since = (datetime.now(_tz.utc) - timedelta(days=days)).isoformat()
+        q = q.gte("created_at", since)
+    q = q.order("created_at", desc=False)
+
+    try:
+        result = q.execute()
+    except Exception as e:
+        logger.error(f"Unit economics query failed: {e}")
+        return {"error": "query_failed", "detail": str(e)}
+
+    rows = result.data or []
+    if not rows:
+        return {
+            "summary": {
+                "total_conversations": 0, "total_turns": 0,
+                "total_cost_usd": 0.0, "avg_cost_per_conversation_usd": 0.0,
+                "avg_cost_per_turn_usd": 0.0, "avg_turns_per_conversation": 0.0,
+            },
+            "breakdown": {"stt_total_usd": 0.0, "llm_total_usd": 0.0, "tts_total_usd": 0.0},
+            "per_conversation": [],
+        }
+
+    # Group by conversation
+    convos: dict[str, list[dict]] = {}
+    for row in rows:
+        cid = row["conversation_id"]
+        convos.setdefault(cid, []).append(row)
+
+    stt_total = llm_total = tts_total = 0.0
+    per_convo = []
+
+    for cid, msgs in convos.items():
+        c_stt = c_llm = c_tts = 0.0
+        turn_count = 0
+
+        for msg in msgs:
+            role = msg["role"]
+            content = msg.get("content") or ""
+            metrics = msg.get("metrics") or {}
+
+            if role == "user":
+                # STT cost: use audio_duration_ms if available, else estimate from stt_ms
+                audio_ms = msg.get("audio_duration_ms") or metrics.get("stt_ms") or 0
+                if audio_ms > 0:
+                    c_stt += (audio_ms / 60000.0) * settings.deepgram_per_minute
+
+            elif role == "assistant":
+                turn_count += 1
+                # LLM cost: estimate tokens from content length (chars / 4)
+                est_output_tokens = len(content) / 4.0
+                # Estimate input ~2x output for conversation context
+                est_input_tokens = est_output_tokens * 2.0
+                model = metrics.get("model_used", "haiku-4.5")
+                if "sonnet" in model.lower():
+                    c_llm += (est_input_tokens / 1000) * settings.anthropic_sonnet_input_per_1k
+                    c_llm += (est_output_tokens / 1000) * settings.anthropic_sonnet_output_per_1k
+                else:
+                    c_llm += (est_input_tokens / 1000) * settings.anthropic_haiku_input_per_1k
+                    c_llm += (est_output_tokens / 1000) * settings.anthropic_haiku_output_per_1k
+
+                # TTS cost: character count
+                c_tts += len(content) * settings.cartesia_per_character
+
+        stt_total += c_stt
+        llm_total += c_llm
+        tts_total += c_tts
+        total_cost = c_stt + c_llm + c_tts
+
+        started_at = None
+        if msgs and msgs[0].get("conversations"):
+            started_at = msgs[0]["conversations"].get("started_at")
+
+        per_convo.append({
+            "conversation_id": cid,
+            "turns": turn_count,
+            "cost_usd": round(total_cost, 6),
+            "stt_usd": round(c_stt, 6),
+            "llm_usd": round(c_llm, 6),
+            "tts_usd": round(c_tts, 6),
+            "created_at": started_at or (msgs[0].get("created_at") if msgs else None),
+        })
+
+    grand_total = stt_total + llm_total + tts_total
+    total_turns = sum(c["turns"] for c in per_convo)
+    n_convos = len(per_convo)
+
+    return {
+        "summary": {
+            "total_conversations": n_convos,
+            "total_turns": total_turns,
+            "total_cost_usd": round(grand_total, 6),
+            "avg_cost_per_conversation_usd": round(grand_total / n_convos, 6) if n_convos else 0.0,
+            "avg_cost_per_turn_usd": round(grand_total / total_turns, 6) if total_turns else 0.0,
+            "avg_turns_per_conversation": round(total_turns / n_convos, 2) if n_convos else 0.0,
+        },
+        "breakdown": {
+            "stt_total_usd": round(stt_total, 6),
+            "llm_total_usd": round(llm_total, 6),
+            "tts_total_usd": round(tts_total, 6),
+        },
+        "per_conversation": per_convo,
+    }
+
+
 # ─── Auth Endpoints ──────────────────────────────────────
 
 class SignupRequest(BaseModel):

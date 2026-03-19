@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     # Audio
     audio_gain: float = 2.0  # PCM gain multiplier for TTS output volume
 
+    # API pricing (per-unit costs, USD) — updated 2026-03-19
+    deepgram_per_minute: float = 0.0043          # Nova-3 pay-as-you-go
+    anthropic_haiku_input_per_1k: float = 0.001  # Haiku 4.5 input
+    anthropic_haiku_output_per_1k: float = 0.005 # Haiku 4.5 output
+    anthropic_sonnet_input_per_1k: float = 0.003 # Sonnet input
+    anthropic_sonnet_output_per_1k: float = 0.015  # Sonnet output
+    cartesia_per_character: float = 0.000060     # Sonic-2 per character
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8080
