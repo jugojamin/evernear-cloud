@@ -44,7 +44,11 @@ tts_degraded_since = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("EverNear Cloud Backend starting up")
+    # Start check-in scheduler as background task
+    from server.checkin_scheduler import run_scheduler
+    scheduler_task = asyncio.create_task(run_scheduler())
     yield
+    scheduler_task.cancel()
     logger.info("EverNear Cloud Backend shutting down")
 
 
@@ -399,6 +403,25 @@ async def analytics(days: int | None = None):
             "last_7d": len(week_audits),
         },
     }
+
+
+# ─── Check-In API ────────────────────────────────────────
+
+@app.get("/api/checkins")
+async def checkins_api():
+    """Check-in event history + response rate. Read-only."""
+    from server.checkin_log import get_checkins
+    recent, rate = get_checkins(20)
+    return {"checkins": recent, "total": len(recent), "response_rate": rate}
+
+
+@app.post("/api/checkins/trigger")
+async def trigger_checkin(body: dict | None = None):
+    """Manually trigger a check-in for testing."""
+    from server.checkin_scheduler import _fire_checkin
+    schedule_name = (body or {}).get("schedule_name", "manual")
+    await _fire_checkin(schedule_name)
+    return {"status": "fired", "schedule_name": schedule_name}
 
 
 # ─── Auth Endpoints ──────────────────────────────────────
@@ -775,6 +798,10 @@ async def voice_websocket(websocket: WebSocket):
         nonlocal interrupted, sending_audio, session_failure_count, stt_session
         nonlocal transcript_timeout_task, stt_consecutive_failures, stt_degraded, stt_degraded_since
         global stt_degraded_global
+
+        # Mark any pending check-in as responded
+        from server.checkin_log import mark_responded
+        mark_responded(user_id)
         
         # Cancel transcript timeout — we got a response
         if transcript_timeout_task:
@@ -958,6 +985,10 @@ async def voice_websocket(websocket: WebSocket):
                 text = data.get("text", "")
                 if not text:
                     continue
+
+                # Mark any pending check-in as responded
+                from server.checkin_log import mark_responded
+                mark_responded(user_id)
 
                 await manager.send_status(user_id, "thinking")
                 try:

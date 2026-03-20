@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     anthropic_sonnet_output_per_1k: float = 0.015  # Sonnet output
     cartesia_per_character: float = 0.000060     # Sonic-2 per character
 
+    # Check-in scheduler
+    checkin_enabled: bool = False  # OFF by default — flip when prompts are ready
+    checkin_schedules: str = '[{"name": "morning", "hour": 9, "minute": 0, "tz": "America/Chicago"}, {"name": "evening", "hour": 20, "minute": 0, "tz": "America/Chicago"}]'
+
     # Rate limiting
     max_connections_per_user: int = 2
     max_messages_per_minute: int = 10
