@@ -616,22 +616,73 @@ async def record_consent(req: ConsentRequest, user_id: str = Depends(require_aut
 
 # ─── Data Deletion ───────────────────────────────────────
 
+from fastapi import Request
+
 @app.delete("/user/data")
-async def delete_user_data(user_id: str = Depends(require_auth)):
-    """Right to deletion (GDPR/CCPA). Cascading delete removes all user data."""
+async def delete_user_data(request: Request, user_id: str = Depends(require_auth)):
+    """Right to deletion (CCPA/MHMDA). FK-safe explicit table deletion with audit trail."""
+    # Confirmation header required to prevent accidental deletion
+    if request.headers.get("X-Confirm-Delete") != "true":
+        raise HTTPException(400, {"error": "Deletion requires X-Confirm-Delete: true header"})
+
     db = get_service_client()
+    now_iso = datetime.now(datetime.now().astimezone().tzinfo).isoformat()
+    tables_to_clear = ["messages", "memories", "conversations", "consent_logs", "user_caregivers", "users"]
+    completed = []
 
-    # Audit before deletion
-    db.table("audit_log").insert({
+    # Write audit log BEFORE deletion (survives the delete)
+    try:
+        db.table("audit_log").insert({
+            "user_id": user_id,
+            "action": "data_deletion",
+            "details": {"tables_cleared": tables_to_clear, "initiated_by": "user", "ts": now_iso},
+        }).execute()
+    except Exception as e:
+        logger.error(f"Failed to write deletion audit log for {user_id}: {e}")
+        # Continue anyway — deletion is more important than audit
+
+    # FK-safe deletion order
+    deletion_steps = [
+        # 1. Messages (FK → conversations)
+        ("messages", lambda: db.table("messages").delete().in_(
+            "conversation_id",
+            [c["id"] for c in (db.table("conversations").select("id").eq("user_id", user_id).execute()).data or []]
+        ).execute()),
+        # 2. Memories
+        ("memories", lambda: db.table("memories").delete().eq("user_id", user_id).execute()),
+        # 3. Conversations
+        ("conversations", lambda: db.table("conversations").delete().eq("user_id", user_id).execute()),
+        # 4. Consent logs
+        ("consent_logs", lambda: db.table("consent_logs").delete().eq("user_id", user_id).execute()),
+        # 5. User-caregiver links
+        ("user_caregivers", lambda: db.table("user_caregivers").delete().eq("user_id", user_id).execute()),
+        # 6. User record
+        ("users", lambda: db.table("users").delete().eq("id", user_id).execute()),
+    ]
+
+    for table_name, delete_fn in deletion_steps:
+        try:
+            delete_fn()
+            completed.append(table_name)
+        except Exception as e:
+            logger.error(f"Data deletion failed at {table_name} for {user_id}: {e}")
+            log_incident("db", "main.py", f"Data deletion failed at {table_name}: {e}", fallback_triggered=False)
+            return {
+                "status": "partial_failure",
+                "completed": completed,
+                "failed_at": table_name,
+                "error": str(e),
+                "user_id": user_id,
+            }
+
+    logger.info(f"Full data deletion completed for user {user_id}")
+    return {
+        "status": "deleted",
         "user_id": user_id,
-        "action": "data_deleted",
-        "details": json.dumps({"event": "user_requested_deletion"}),
-    }).execute()
-
-    # Cascade delete (FK constraints handle related records)
-    db.table("users").delete().eq("id", user_id).execute()
-
-    return {"status": "deleted", "message": "All user data has been permanently removed."}
+        "tables_cleared": completed,
+        "tables_preserved": ["audit_log", "caregivers"],
+        "deleted_at": now_iso,
+    }
 
 
 # ─── WebSocket Voice Endpoint ────────────────────────────
