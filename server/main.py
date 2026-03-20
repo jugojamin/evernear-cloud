@@ -424,6 +424,65 @@ async def trigger_checkin(body: dict | None = None):
     return {"status": "fired", "schedule_name": schedule_name}
 
 
+# ─── Diagnostics ─────────────────────────────────────────
+
+import json as _json
+from pathlib import Path as _Path
+
+_DIAGNOSTICS_FILE = _Path("/app/diagnostics.json")
+_MAX_DIAGNOSTICS = 100
+
+
+def _read_diagnostics() -> list[dict]:
+    try:
+        if _DIAGNOSTICS_FILE.exists():
+            return _json.loads(_DIAGNOSTICS_FILE.read_text())
+    except Exception:
+        pass
+    return []
+
+
+def _write_diagnostics(entries: list[dict]):
+    try:
+        _DIAGNOSTICS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _DIAGNOSTICS_FILE.write_text(_json.dumps(entries[-_MAX_DIAGNOSTICS:], indent=2))
+    except Exception as e:
+        logger.error(f"Failed to write diagnostics: {e}")
+
+
+class DiagnosticReport(BaseModel):
+    type: str  # crash, hang, cpu, metric
+    timestamp: str
+    summary: str
+    raw: dict | None = None
+
+
+@app.post("/api/diagnostics")
+async def post_diagnostic(report: DiagnosticReport, user_id: str = Depends(require_auth)):
+    """Receive crash/diagnostic reports from iOS MetricKit."""
+    entry = {
+        "user_id": user_id,
+        "type": report.type,
+        "timestamp": report.timestamp,
+        "summary": report.summary,
+        "raw": report.raw,
+        "received_at": datetime.now(datetime.now().astimezone().tzinfo).isoformat(),
+    }
+    entries = _read_diagnostics()
+    entries.append(entry)
+    _write_diagnostics(entries)
+    logger.info(f"Diagnostic received: type={report.type}, user={user_id}, summary={report.summary[:100]}")
+    return {"status": "received"}
+
+
+@app.get("/api/diagnostics")
+async def get_diagnostics():
+    """Recent diagnostic reports. Read-only."""
+    entries = _read_diagnostics()
+    recent = list(reversed(entries[-20:]))
+    return {"diagnostics": recent, "total": len(entries)}
+
+
 # ─── Auth Endpoints ──────────────────────────────────────
 
 class SignupRequest(BaseModel):
