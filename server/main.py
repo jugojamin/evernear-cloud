@@ -483,6 +483,118 @@ async def get_diagnostics():
     return {"diagnostics": recent, "total": len(entries)}
 
 
+# ─── Quality Metrics ─────────────────────────────────────
+
+@app.get("/api/quality-metrics")
+async def quality_metrics(days: int | None = None):
+    """Conversation quality metrics derived from existing message data. Read-only."""
+    from datetime import timezone as _tz, timedelta
+    db = get_service_client()
+    since = (datetime.now(_tz.utc) - timedelta(days=days)).isoformat() if days else None
+
+    try:
+        # Conversations
+        cq = db.table("conversations").select("id, user_id, started_at, turn_count")
+        if since:
+            cq = cq.gte("started_at", since)
+        convos = (cq.execute()).data or []
+
+        # Messages with timestamps
+        mq = db.table("messages").select("id, conversation_id, role, content, created_at, latency_ms, metrics")
+        if since:
+            mq = mq.gte("created_at", since)
+        mq = mq.order("created_at", desc=False)
+        msgs = (mq.execute()).data or []
+    except Exception as e:
+        logger.error(f"Quality metrics query failed: {e}")
+        return {"error": "query_failed", "detail": str(e)}
+
+    if not msgs:
+        return {
+            "period": f"last_{days}d" if days else "all",
+            "response_latency": {"avg_ms": 0, "p50_ms": 0, "p95_ms": 0, "sample_count": 0},
+            "turn_length": {"avg_user_chars": 0, "avg_assistant_chars": 0, "ratio": 0},
+            "session_health": {"avg_turns_per_session": 0, "single_turn_sessions": 0, "sessions_over_5_turns": 0, "avg_session_duration_seconds": 0},
+            "drop_off": {"sessions_with_no_user_response": 0, "pct_sessions_under_2_turns": 0},
+        }
+
+    # Group messages by conversation
+    msg_by_convo: dict[str, list[dict]] = {}
+    for m in msgs:
+        msg_by_convo.setdefault(m["conversation_id"], []).append(m)
+
+    # Response latency: time between user msg and next assistant msg
+    latencies = []
+    for cid, cmsg in msg_by_convo.items():
+        for i, m in enumerate(cmsg):
+            if m["role"] == "user" and i + 1 < len(cmsg) and cmsg[i + 1]["role"] == "assistant":
+                # Use latency_ms if available, else derive from timestamps
+                lat = cmsg[i + 1].get("latency_ms")
+                if lat and lat > 0:
+                    latencies.append(lat)
+                else:
+                    try:
+                        from datetime import datetime as _dt
+                        t1 = _dt.fromisoformat(m["created_at"])
+                        t2 = _dt.fromisoformat(cmsg[i + 1]["created_at"])
+                        latencies.append(int((t2 - t1).total_seconds() * 1000))
+                    except Exception:
+                        pass
+
+    latencies.sort()
+    n_lat = len(latencies)
+    avg_lat = int(sum(latencies) / n_lat) if n_lat else 0
+    p50 = latencies[n_lat // 2] if n_lat else 0
+    p95 = latencies[int(n_lat * 0.95)] if n_lat else 0
+
+    # Turn length
+    user_chars = [len(m.get("content", "")) for m in msgs if m["role"] == "user"]
+    asst_chars = [len(m.get("content", "")) for m in msgs if m["role"] == "assistant"]
+    avg_uc = round(sum(user_chars) / len(user_chars), 1) if user_chars else 0
+    avg_ac = round(sum(asst_chars) / len(asst_chars), 1) if asst_chars else 0
+    ratio = round(avg_ac / avg_uc, 1) if avg_uc > 0 else 0
+
+    # Session health
+    turn_counts = [c.get("turn_count", 0) or 0 for c in convos]
+    avg_turns = round(sum(turn_counts) / len(turn_counts), 1) if turn_counts else 0
+    single_turn = sum(1 for t in turn_counts if t <= 1)
+    over_5 = sum(1 for t in turn_counts if t > 5)
+
+    # Avg session duration
+    durations_s = []
+    for cid, cmsg in msg_by_convo.items():
+        if len(cmsg) >= 2:
+            try:
+                from datetime import datetime as _dt
+                first = _dt.fromisoformat(cmsg[0]["created_at"])
+                last = _dt.fromisoformat(cmsg[-1]["created_at"])
+                durations_s.append((last - first).total_seconds())
+            except Exception:
+                pass
+    avg_dur_s = round(sum(durations_s) / len(durations_s), 1) if durations_s else 0
+
+    # Drop-off
+    n_convos = len(convos) or 1
+    under_2 = sum(1 for t in turn_counts if t < 2)
+    no_response = sum(1 for cid, cmsg in msg_by_convo.items() if all(m["role"] == "assistant" for m in cmsg))
+
+    return {
+        "period": f"last_{days}d" if days else "all",
+        "response_latency": {"avg_ms": avg_lat, "p50_ms": p50, "p95_ms": p95, "sample_count": n_lat},
+        "turn_length": {"avg_user_chars": avg_uc, "avg_assistant_chars": avg_ac, "ratio": ratio},
+        "session_health": {
+            "avg_turns_per_session": avg_turns,
+            "single_turn_sessions": single_turn,
+            "sessions_over_5_turns": over_5,
+            "avg_session_duration_seconds": avg_dur_s,
+        },
+        "drop_off": {
+            "sessions_with_no_user_response": no_response,
+            "pct_sessions_under_2_turns": round(under_2 / n_convos, 2),
+        },
+    }
+
+
 # ─── Auth Endpoints ──────────────────────────────────────
 
 class SignupRequest(BaseModel):
