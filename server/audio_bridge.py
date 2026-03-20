@@ -61,9 +61,11 @@ class DeepgramSTTSession:
         self,
         on_transcript: Callable[[str], Awaitable[None]],
         on_interim: Callable[[str], Awaitable[None]] | None = None,
+        codec: str = "pcm",  # "pcm" or "opus"
     ):
         self._on_transcript = on_transcript
         self._on_interim = on_interim
+        self._codec = codec
         self._connection: AsyncListenWebSocketClient | None = None
         self._client = None
         self._started = False
@@ -92,15 +94,24 @@ class DeepgramSTTSession:
             self._connection.on(LiveTranscriptionEvents.Error, self._handle_error)
             self._connection.on(LiveTranscriptionEvents.Close, self._handle_close)
 
+            # Configure encoding based on client codec
+            if self._codec == "opus":
+                encoding = "opus"
+                sample_rate = 24000  # Opus carries its own sample rate
+            else:
+                encoding = "linear16"
+                sample_rate = 48000
+
             options = LiveOptions(
                 model="nova-3",
-                encoding="linear16",
-                sample_rate=48000,
+                encoding=encoding,
+                sample_rate=sample_rate,
                 interim_results=True,
                 endpointing=s.vad_silence_ms,
                 smart_format=True,
                 punctuate=True,
             )
+            logger.info(f"Deepgram STT config: encoding={encoding}, sample_rate={sample_rate}")
 
             result = await self._connection.start(options)
             if not result:

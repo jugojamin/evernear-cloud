@@ -952,6 +952,7 @@ async def voice_websocket(websocket: WebSocket):
     stt_degraded = False
     stt_degraded_since = None  # float (time.monotonic) when degraded mode started
     audio_frame_count = 0
+    audio_codec = "pcm"  # "pcm" or "opus" — set by client in session_start
 
     async def _send_nudge_tts(text: str):
         """Send a short text as TTS audio to the user."""
@@ -1154,9 +1155,13 @@ async def voice_websocket(websocket: WebSocket):
                     continue
 
             if msg_type == "session_start":
+                # Detect codec from client (default: pcm for backward compat)
+                audio_codec = data.get("codec", "pcm")
+                logger.info(f"Session start for {user_id}, codec={audio_codec}")
                 # Start Deepgram STT session
                 stt_session = DeepgramSTTSession(
                     on_transcript=_handle_voice_response,
+                    codec=audio_codec,
                 )
                 stt_started = await stt_session.start()
                 if not stt_started:
@@ -1213,9 +1218,10 @@ async def voice_websocket(websocket: WebSocket):
                     
                     # Create a fresh STT session if none exists (first frame of a new turn)
                     if not stt_session:
-                        logger.info(f"Creating new Deepgram session for {user_id} (new turn)")
+                        logger.info(f"Creating new Deepgram session for {user_id} (new turn, codec={audio_codec})")
                         stt_session = DeepgramSTTSession(
                             on_transcript=_handle_voice_response,
+                            codec=audio_codec,
                         )
                         stt_started = await stt_session.start()
                         if not stt_started:
