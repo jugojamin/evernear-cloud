@@ -44,11 +44,14 @@ tts_degraded_since = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("EverNear Cloud Backend starting up")
-    # Start check-in scheduler as background task
-    from server.checkin_scheduler import run_scheduler
-    scheduler_task = asyncio.create_task(run_scheduler())
+    # Start background schedulers
+    from server.checkin_scheduler import run_scheduler as checkin_scheduler
+    from server.retention import run_scheduler as retention_scheduler
+    checkin_task = asyncio.create_task(checkin_scheduler())
+    retention_task = asyncio.create_task(retention_scheduler())
     yield
-    scheduler_task.cancel()
+    checkin_task.cancel()
+    retention_task.cancel()
     logger.info("EverNear Cloud Backend shutting down")
 
 
@@ -481,6 +484,15 @@ async def get_diagnostics():
     entries = _read_diagnostics()
     recent = list(reversed(entries[-20:]))
     return {"diagnostics": recent, "total": len(entries)}
+
+
+# ─── Retention ────────────────────────────────────────────
+
+@app.get("/api/retention")
+async def retention_status():
+    """Current retention config + last cleanup run. Read-only."""
+    from server.retention import get_retention_status
+    return get_retention_status()
 
 
 # ─── Quality Metrics ─────────────────────────────────────

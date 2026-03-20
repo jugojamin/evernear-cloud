@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     anthropic_sonnet_output_per_1k: float = 0.015  # Sonnet output
     cartesia_per_character: float = 0.000060     # Sonic-2 per character
 
+    # Data retention (days, 0 = never expire)
+    retention_messages_days: int = 365
+    retention_incidents_days: int = 90
+    retention_checkins_days: int = 90
+    retention_diagnostics_days: int = 90
+    retention_conversations_days: int = 365
+    retention_memories_days: int = 0  # core to companion — never expire
+
     # Check-in scheduler
     checkin_enabled: bool = False  # OFF by default — flip when prompts are ready
     checkin_schedules: str = '[{"name": "morning", "hour": 9, "minute": 0, "tz": "America/Chicago"}, {"name": "evening", "hour": 20, "minute": 0, "tz": "America/Chicago"}]'
