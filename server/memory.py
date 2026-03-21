@@ -137,13 +137,22 @@ async def deduplicate_and_store(
             "category": mem["category"],
             "content": mem["content"],
             "importance": mem.get("importance", 3),
-            "confidence": mem.get("confidence", 0.5),
             "active": True,
         }
         if source_turn_id:
             record["source_turn_id"] = source_turn_id
 
-        db.table("memories").insert(record).execute()
+        # Try with confidence column; fall back without if column doesn't exist
+        record_with_confidence = {**record, "confidence": mem.get("confidence", 0.5)}
+        try:
+            db.table("memories").insert(record_with_confidence).execute()
+        except Exception as e:
+            if "confidence" in str(e):
+                logger.warning("memories.confidence column missing — storing without it")
+                db.table("memories").insert(record).execute()
+            else:
+                raise
+
         stored += 1
         logger.info(f"Stored memory [{mem['category']}]: {mem['content'][:50]}")
 
