@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from server.checkin_log import log_checkin
+from server.checkin_prompts import pick_variant
 from server.config import get_settings
 from server.incident_log import log_incident
 from server.notifications import push_service
@@ -15,8 +16,8 @@ from server.transport import manager
 
 logger = logging.getLogger(__name__)
 
-# Placeholder message — will be replaced when prompt design is done
-CHECKIN_PLACEHOLDER = "Hi there — just checking in."
+# How recently must the user have had a conversation to skip check-in
+SKIP_IF_RECENT_HOURS = 2
 
 
 def _parse_schedules(raw: str) -> list[dict]:
@@ -43,16 +44,43 @@ def _next_fire_time(schedule: dict) -> datetime:
     return target
 
 
+async def _had_recent_conversation(user_id: str, hours: int = SKIP_IF_RECENT_HOURS) -> bool:
+    """Check if user had a conversation within the last N hours."""
+    try:
+        from server.db.client import get_service_client
+        db = get_service_client()
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        result = (
+            db.table("conversations")
+            .select("id")
+            .eq("user_id", user_id)
+            .gte("started_at", cutoff)
+            .limit(1)
+            .execute()
+        )
+        had_recent = bool(result.data)
+        if had_recent:
+            logger.info(f"User {user_id} had recent conversation — skipping check-in")
+        return had_recent
+    except Exception as e:
+        logger.warning(f"Could not check recent conversations for {user_id}: {e}")
+        return False  # Default to sending if we can't check
+
+
+def _get_user_timezone(user: dict) -> str:
+    """Get user's timezone, falling back to schedule tz or UTC."""
+    return user.get("timezone") or "UTC"
+
+
 async def _fire_checkin(schedule_name: str):
-    """Execute a single check-in event for all connected or known users."""
+    """Execute a single check-in event for all known users."""
     from server.db.client import get_service_client
 
     settings = get_settings()
 
-    # Get all users (single-user system for now, but future-safe)
     try:
         db = get_service_client()
-        users = (db.table("users").select("id").execute()).data or []
+        users = (db.table("users").select("id, device_token, timezone, preferred_name").execute()).data or []
     except Exception as e:
         logger.error(f"Check-in failed to fetch users: {e}")
         log_incident("transport", "checkin_scheduler.py", f"Check-in user fetch failed: {e}", fallback_triggered=False)
@@ -61,51 +89,62 @@ async def _fire_checkin(schedule_name: str):
     for user in users:
         user_id = user["id"]
 
+        # Skip if user had a recent conversation
+        if await _had_recent_conversation(user_id):
+            log_checkin(schedule_name, user_id, "skipped")
+            continue
+
+        # Pick a varied, natural prompt for this user + day
+        message = pick_variant(schedule_name, user_id)
+
+        # Personalize with name if available
+        preferred_name = user.get("preferred_name")
+        if preferred_name and not message.lower().startswith(f"hi {preferred_name.lower()}"):
+            # Some variants start with "Hi there" or "Hey" — personalize them
+            for generic in ["Hi there", "Hey there"]:
+                if message.startswith(generic):
+                    message = message.replace(generic, f"Hi {preferred_name}", 1)
+                    break
+
         # Try WebSocket first
         if manager.is_connected(user_id):
             try:
-                from uuid import uuid4
                 checkin_id = log_checkin(schedule_name, user_id, "websocket")
                 await manager.send_json(user_id, {
                     "type": "checkin",
                     "checkin_id": checkin_id,
                     "schedule_name": schedule_name,
                     "ts": datetime.now(timezone.utc).isoformat(),
-                    "message": CHECKIN_PLACEHOLDER,
+                    "message": message,
                 })
-                logger.info(f"Check-in fired: schedule={schedule_name}, user={user_id}, delivery=websocket, checkin_id={checkin_id}")
+                logger.info(f"Check-in fired: schedule={schedule_name}, user={user_id}, delivery=websocket")
                 continue
             except Exception as e:
                 logger.error(f"Check-in WebSocket delivery failed for {user_id}: {e}")
 
         # Fall back to push notification
-        try:
-            db = get_service_client()
-            profile = (db.table("users").select("device_token").eq("id", user_id).single().execute()).data
-            device_token = (profile or {}).get("device_token")
-
-            if device_token:
+        device_token = user.get("device_token")
+        if device_token:
+            try:
                 success = await push_service.send_notification(
                     device_token=device_token,
                     title="EverNear",
-                    body=CHECKIN_PLACEHOLDER,
+                    body=message,
                     category="checkin",
                 )
                 delivery = "push" if success else "failed"
-            else:
+            except Exception as e:
+                logger.error(f"Check-in push delivery failed for {user_id}: {e}")
                 delivery = "failed"
-                logger.warning(f"No device token for user {user_id} — check-in not delivered")
+        else:
+            delivery = "no_token"
+            logger.warning(f"No device token for user {user_id} — check-in not delivered")
 
-            checkin_id = log_checkin(schedule_name, user_id, delivery)
-            logger.info(f"Check-in fired: schedule={schedule_name}, user={user_id}, delivery={delivery}, checkin_id={checkin_id}")
+        checkin_id = log_checkin(schedule_name, user_id, delivery)
+        logger.info(f"Check-in fired: schedule={schedule_name}, user={user_id}, delivery={delivery}")
 
-            if delivery == "failed":
-                log_incident("transport", "checkin_scheduler.py", f"Check-in delivery failed for {user_id}", fallback_triggered=False)
-
-        except Exception as e:
-            logger.error(f"Check-in push delivery failed for {user_id}: {e}")
-            log_checkin(schedule_name, user_id, "failed")
-            log_incident("transport", "checkin_scheduler.py", f"Check-in push failed: {e}", fallback_triggered=False)
+        if delivery in ("failed", "no_token"):
+            log_incident("transport", "checkin_scheduler.py", f"Check-in delivery={delivery} for {user_id}", fallback_triggered=False)
 
 
 async def run_scheduler():
@@ -124,7 +163,6 @@ async def run_scheduler():
     logger.info(f"Check-in scheduler started with {len(schedules)} schedule(s)")
 
     while True:
-        # Find the next fire time across all schedules
         next_fires = []
         for sched in schedules:
             nft = _next_fire_time(sched)
@@ -133,14 +171,12 @@ async def run_scheduler():
         next_fires.sort(key=lambda x: x[0])
         next_time, next_sched = next_fires[0]
 
-        # Sleep until next fire time
         now = datetime.now(ZoneInfo(next_sched.get("tz", "UTC")))
         sleep_seconds = max(0, (next_time - now).total_seconds())
         logger.info(f"Next check-in '{next_sched['name']}' in {sleep_seconds:.0f}s at {next_time.isoformat()}")
 
         await asyncio.sleep(sleep_seconds)
 
-        # Fire the check-in
         try:
             await _fire_checkin(next_sched["name"])
         except Exception as e:

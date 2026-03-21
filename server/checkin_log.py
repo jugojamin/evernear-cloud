@@ -33,7 +33,7 @@ def _write_log(entries: list[dict]):
 def log_checkin(
     schedule_name: str,
     user_id: str,
-    delivery: str,  # "websocket" | "push" | "failed"
+    delivery: str,  # "websocket" | "push" | "failed" | "skipped" | "no_token"
 ) -> str:
     """Record a check-in event. Returns checkin_id."""
     checkin_id = str(uuid4())[:8]
