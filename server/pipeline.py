@@ -110,8 +110,13 @@ class EverNearPipeline:
         metrics.stt_ms = 0
 
         # Route LLM
+        # If memories exist, the user has been onboarded in a prior session —
+        # skip onboarding even if onboarding_state says incomplete (bug: state
+        # was never updated after first session)
         onboarding_active = bool(
-            onboarding_state and not onboarding_state.get("completed", False)
+            onboarding_state
+            and not onboarding_state.get("completed", False)
+            and not memories  # memories present = already onboarded
         )
         routing = route_llm(
             transcript=user_text,
