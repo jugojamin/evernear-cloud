@@ -414,3 +414,66 @@ class TestLogWriteFailure:
         r = validator.validate("Hello there.", "Hi", _make_cache())
         assert r.action == ValidationAction.ALLOW
         assert r.response == "Hello there."
+
+
+# === WO-2026-061-A: False Positive Tuning Tests ===
+
+class TestMemoryInquiryExemption:
+    """Check 3 should NOT fire when asking about or echoing family members."""
+
+    def test_asking_how_is_your_daughter(self, validator):
+        r = validator.validate("Good morning! How is your daughter doing?", "Good morning", _make_cache())
+        assert r.action == ValidationAction.ALLOW
+
+    def test_tell_me_about_your_family(self, validator):
+        r = validator.validate("I would love to hear about your family.", "What should we talk about?", _make_cache())
+        assert r.action == ValidationAction.ALLOW
+
+    def test_empathetic_mirror_miss_husband(self, validator):
+        r = validator.validate("I can only imagine how much you miss your husband.", "I miss my husband", _make_cache())
+        assert r.action == ValidationAction.ALLOW
+
+    def test_user_mentioned_son_echo(self, validator):
+        r = validator.validate("That is wonderful! How is your son doing?", "I talked to my son today", _make_cache())
+        assert r.action == ValidationAction.ALLOW
+
+    def test_asserting_unknown_friend_still_blocked(self, validator):
+        """True positive: inventing a friend the user never mentioned."""
+        r = validator.validate("Your friend Margaret would love that.", "I like gardening", _make_cache())
+        assert r.action != ValidationAction.ALLOW
+        assert any("memory" in c for c in r.checks_triggered)
+
+
+class TestMedicalTryTakingTuning:
+    """'try taking' should only block with medication names, not 'a deep breath'."""
+
+    def test_try_taking_deep_breath_allowed(self, validator):
+        r = validator.validate("Try taking a deep breath and relax.", "I feel anxious", _make_cache())
+        assert r.action == ValidationAction.ALLOW
+
+    def test_try_taking_a_walk_allowed(self, validator):
+        r = validator.validate("Try taking a short walk outside.", "I feel restless", _make_cache())
+        assert r.action == ValidationAction.ALLOW
+
+    def test_try_taking_ibuprofen_blocked(self, validator):
+        r = validator.validate("Try taking ibuprofen for that.", "My head hurts", _make_cache())
+        assert r.action == ValidationAction.BLOCK
+        assert any("medical" in c for c in r.checks_triggered)
+
+
+class TestFalseCertaintyHedgeExpansion:
+    """Check 5 should allow responses that acknowledge inability to check."""
+
+    def test_wish_i_could_check_weather(self, validator):
+        r = validator.validate("I wish I could check that for you, but the weather has been unpredictable.", "What's the weather?", _make_cache())
+        assert r.action == ValidationAction.ALLOW
+
+    def test_dont_know_temperature(self, validator):
+        r = validator.validate("I don't know the exact temperature right now.", "Is it cold out?", _make_cache())
+        assert r.action == ValidationAction.ALLOW
+
+    def test_unhedged_weather_claim_still_blocked(self, validator):
+        """True positive: asserting weather facts without hedge."""
+        r = validator.validate("It is 72 degrees and sunny outside right now.", "What's the weather?", _make_cache())
+        assert r.action == ValidationAction.REWRITE
+        assert any("false_certainty" in c for c in r.checks_triggered)

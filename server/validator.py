@@ -106,7 +106,6 @@ TIER_A_PRIORITY = ["medical_emergency", "self_harm", "fall"]
 # Check 2: Medical Advice — scans response
 MEDICAL_HARD_BLOCKS: list[str] = [
     "you should take",
-    "try taking",
     "stop taking",
     "increase your dose",
     "decrease your dose",
@@ -114,6 +113,11 @@ MEDICAL_HARD_BLOCKS: list[str] = [
     "you probably have",
     "you might have",
 ]
+# "try taking" removed — false positive on "try taking a deep breath/walk/nap".
+# Medication-specific "try taking [med]" is caught by Check 2 medication+advisory scan.
+
+# "try taking" is only blocked when followed by a medication name
+MEDICAL_TRY_TAKING_PATTERN = "try taking"
 # Last reviewed: 2026-03-15 (initial V1 seed list — North)
 
 MEDICAL_SOFT_FLAGS: list[str] = [
@@ -190,7 +194,11 @@ EXTERNAL_FACT_CATEGORIES: list[str] = [
 ]
 # Last reviewed: 2026-03-15 (initial V1 seed list — North)
 
-HEDGE_WORDS: list[str] = ["i think", "i'm not sure", "if i remember", "i believe", "maybe"]
+HEDGE_WORDS: list[str] = [
+    "i think", "i'm not sure", "if i remember", "i believe", "maybe",
+    "i wish i could", "i don't have a way", "i can't check", "i can't look",
+    "i'm not able to", "i don't know", "not sure about",
+]
 
 
 # --- Replacement Responses (all static strings) ---
@@ -248,8 +256,8 @@ class ResponseValidator:
         if medical:
             results.append(medical)
 
-        # Check 3: Memory Certainty (scans response + memory_cache)
-        memory = self._check_memory_certainty(response, memory_cache)
+        # Check 3: Memory Certainty (scans response + memory_cache + user_input)
+        memory = self._check_memory_certainty(response, memory_cache, user_input)
         if memory:
             results.append(memory)
 
@@ -345,6 +353,19 @@ class ResponseValidator:
                     {"pattern": pattern},
                 )
 
+        # "try taking" — only block if followed by a medication name (not "a deep breath")
+        if MEDICAL_TRY_TAKING_PATTERN in response_lower:
+            idx = response_lower.find(MEDICAL_TRY_TAKING_PATTERN)
+            window = response_lower[idx + len(MEDICAL_TRY_TAKING_PATTERN):idx + len(MEDICAL_TRY_TAKING_PATTERN) + 40]
+            for med in COMMON_MEDICATIONS:
+                if med in window:
+                    return (
+                        ValidationAction.BLOCK,
+                        MEDICAL_BLOCK_RESPONSE,
+                        "medical:hard_block",
+                        {"pattern": f"try taking + {med}"},
+                    )
+
         # Soft flags: "that sounds like" + medical condition within 5 words
         for flag in MEDICAL_SOFT_FLAGS:
             idx = response_lower.find(flag)
@@ -382,7 +403,7 @@ class ResponseValidator:
         return None
 
     def _check_memory_certainty(
-        self, response: str, memory_cache: MemoryCache | None
+        self, response: str, memory_cache: MemoryCache | None, user_input: str = ""
     ) -> tuple[ValidationAction, str, str, dict] | None:
         """Check 3: Memory Certainty — validate personal assertions against stored memories."""
         response_lower = response.lower()
@@ -420,6 +441,26 @@ class ResponseValidator:
 
         if not has_assertion:
             return None
+
+        # Inquiry exemption: if the response is ASKING about family (not asserting facts),
+        # allow it. Questions ("How is your daughter?"), invitations ("Tell me about your
+        # husband"), and empathetic mirrors ("I know you miss your husband") are safe.
+        inquiry_patterns = [
+            "how is your", "how's your", "how are your",
+            "tell me about your", "about your",
+            "do you have", "would you like to tell me",
+            "hear about your", "you miss your",
+            "i know you miss", "i can only imagine",
+            "what about your", "does your", "is your",
+        ]
+        if any(ip in response_lower for ip in inquiry_patterns):
+            return None
+
+        # User-initiated context: if the user mentioned the family member first,
+        # the LLM echoing it back is not a false memory assertion
+        for word in FAMILY_PERSON_WORDS:
+            if word in assertion_detail and word in user_input.lower():
+                return None  # User mentioned it first — echo is safe
 
         # If no memory cache available, block personal assertions by default
         if memory_cache is None:
