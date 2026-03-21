@@ -184,7 +184,7 @@ class TestResample24kTo48k:
 
     def test_duplicates_each_sample(self):
         pcm_24k = struct.pack("<3h", 1000, -500, 32000)
-        pcm_48k = resample_24k_to_48k(pcm_24k)
+        pcm_48k = resample_24k_to_48k(pcm_24k, gain=1.0)
         samples = struct.unpack(f"<{len(pcm_48k) // 2}h", pcm_48k)
         assert samples == (1000, 1000, -500, -500, 32000, 32000)
 

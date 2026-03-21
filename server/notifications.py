@@ -53,6 +53,12 @@ def _get_apns_client():
 class PushNotificationService:
     """Apple Push Notification service wrapper."""
 
+    def __init__(self, key_id: str = "", team_id: str = "", key_path: str = ""):
+        self._key_id = key_id
+        self._team_id = team_id
+        self._key_path = key_path
+        self._configured = bool(key_id and team_id and key_path)
+
     async def send_medication_reminder(
         self,
         device_token: str,
