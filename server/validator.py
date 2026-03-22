@@ -456,11 +456,32 @@ class ResponseValidator:
         if any(ip in response_lower for ip in inquiry_patterns):
             return None
 
-        # User-initiated context: if the user mentioned the family member first,
-        # the LLM echoing it back is not a false memory assertion
-        for word in FAMILY_PERSON_WORDS:
-            if word in assertion_detail and word in user_input.lower():
-                return None  # User mentioned it first — echo is safe
+        # Reflective/empathetic exemption: if the response is reflecting back what
+        # the user said (not asserting new facts), it's conversational, not fabrication.
+        reflective_patterns = [
+            "sounds like your", "it sounds like your",
+            "that must be", "that sounds",
+            "i can tell your", "i can see your",
+            "it must be", "it's clear your",
+            "sounds like you", "it sounds like you",
+            "i'm glad your", "i'm sorry your", "i'm happy your",
+            "glad to hear your", "sorry to hear your",
+            "thank you for sharing", "thank you for telling",
+            "that's wonderful", "that's lovely", "how wonderful",
+        ]
+        if any(rp in response_lower for rp in reflective_patterns):
+            return None
+
+        # User-initiated context: if the user mentioned a family/person word,
+        # the LLM echoing it back is not a false memory assertion.
+        # Check against the full response, not just assertion_detail — covers
+        # cases where assertion_detail is a pattern like "you mentioned" but
+        # the response also references a family member the user brought up.
+        if user_input:
+            user_lower = user_input.lower()
+            for word in FAMILY_PERSON_WORDS:
+                if word in user_lower and word in response_lower:
+                    return None  # User mentioned it first — echo is safe
 
         # If no memory cache available, block personal assertions by default
         if memory_cache is None:

@@ -437,6 +437,57 @@ class TestMemoryInquiryExemption:
         r = validator.validate("That is wonderful! How is your son doing?", "I talked to my son today", _make_cache())
         assert r.action == ValidationAction.ALLOW
 
+    def test_reflective_sounds_like_your_daughter(self, validator):
+        """Reflective statement about user's daughter they just mentioned."""
+        r = validator.validate(
+            "Sounds like your daughter is doing well — that's great to hear.",
+            "My daughter just got a promotion",
+            _make_cache(),
+        )
+        assert r.action == ValidationAction.ALLOW
+
+    def test_reflective_that_must_be(self, validator):
+        r = validator.validate(
+            "That must be so nice having your son nearby.",
+            "My son lives right down the street",
+            _make_cache(),
+        )
+        assert r.action == ValidationAction.ALLOW
+
+    def test_reflective_sorry_to_hear(self, validator):
+        r = validator.validate(
+            "I'm sorry your husband hasn't been feeling well.",
+            "My husband has been under the weather",
+            _make_cache(),
+        )
+        assert r.action == ValidationAction.ALLOW
+
+    def test_reflective_glad_your(self, validator):
+        r = validator.validate(
+            "I'm glad your friend could visit today.",
+            "My friend came by this afternoon",
+            _make_cache(),
+        )
+        assert r.action == ValidationAction.ALLOW
+
+    def test_user_echo_via_you_mentioned_pattern(self, validator):
+        """'you mentioned your brother' should be allowed when user said 'my brother'."""
+        r = validator.validate(
+            "You mentioned your brother — how is he doing?",
+            "I was talking to my brother earlier",
+            _make_cache(),
+        )
+        assert r.action == ValidationAction.ALLOW
+
+    def test_user_echo_broad_response_match(self, validator):
+        """User says 'granddaughter', response says 'your granddaughter' — echo, not fabrication."""
+        r = validator.validate(
+            "Your granddaughter sounds like a wonderful person.",
+            "My granddaughter made me a card",
+            _make_cache(),
+        )
+        assert r.action == ValidationAction.ALLOW
+
     def test_asserting_unknown_friend_still_blocked(self, validator):
         """True positive: inventing a friend the user never mentioned."""
         r = validator.validate("Your friend Margaret would love that.", "I like gardening", _make_cache())
