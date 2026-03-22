@@ -168,6 +168,32 @@ class TestTokenBudgetInBuildContext:
         assert len(system) < 12000  # ~3000 tokens
 
 
+class TestUserMessageFlowThrough:
+    def test_user_message_changes_memory_output(self):
+        """When user_message is passed, format_memory_summary produces different output."""
+        memories = [
+            {"category": "family", "content": "Has a daughter named Sarah who lives in Austin"},
+            {"category": "health", "content": "Takes blood pressure medication daily"},
+            {"category": "interests", "content": "Loves crossword puzzles"},
+        ]
+        without_msg = format_memory_summary(memories, user_message="")
+        with_msg = format_memory_summary(memories, user_message="How is Sarah doing?")
+        # With a relevant message, Sarah memory should be promoted with "You know that"
+        assert "You know that" in with_msg
+        assert "You know that" not in without_msg
+
+    def test_build_context_passes_user_message(self):
+        """build_context with user_message produces relevance-aware output."""
+        memories = [
+            {"category": "family", "content": "Has a daughter named Sarah"},
+            {"category": "health", "content": "Takes medication for blood pressure"},
+        ]
+        system_no_msg, _ = build_context("Test", memories, [], user_message="")
+        system_with_msg, _ = build_context("Test", memories, [], user_message="Tell me about Sarah")
+        # With message, family memory should be promoted
+        assert "You know that" in system_with_msg
+
+
 class TestDeduplicateAndStoreFuzzy:
     @pytest.mark.asyncio
     async def test_fuzzy_duplicate_skipped(self):

@@ -134,6 +134,7 @@ class EverNearPipeline:
             conversation_history=self.conversation_history,
             onboarding_state=onboarding_state,
             max_turns=self._settings.conversation_history_turns,
+            user_message=user_text,
         )
 
         # Add user message to history
