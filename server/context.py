@@ -177,6 +177,22 @@ def build_context(
             if onb_prompt:
                 system_parts.append(f"ONBOARDING — Current Section: {section}\n{onb_prompt}")
 
+    # 6. Returning user warmth
+    onboarding_completed = onboarding_state and onboarding_state.get("completed", False)
+    if onboarding_completed:
+        if memories:
+            system_parts.append(
+                "This person has talked to you before. You remember things about them. "
+                "When greeting them, you may naturally reference something you remember — "
+                "their name, something they mentioned, a topic they care about. Keep it "
+                "brief and warm, like recognizing a friend. Don't list facts."
+            )
+        else:
+            system_parts.append(
+                "This person has talked to you before but you don't remember specifics. "
+                "Greet them warmly without pretending to remember."
+            )
+
     system_prompt = "\n\n".join(p for p in system_parts if p)
 
     # 6. Token budget check — if system prompt > 2000 tokens (~8000 chars), trim

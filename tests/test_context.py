@@ -117,6 +117,35 @@ class TestBuildContext:
         # Should not include onboarding-specific section
         assert "Current Section" not in system
 
+    def test_returning_user_with_memories_gets_warm_greeting(self):
+        system, _ = build_context(
+            user_name="Margaret",
+            memories=[{"category": "family", "content": "Has a daughter named Sarah"}],
+            conversation_history=[],
+            onboarding_state={"completed": True},
+        )
+        assert "talked to you before" in system
+        assert "remember things about them" in system
+
+    def test_returning_user_without_memories_gets_honest_greeting(self):
+        system, _ = build_context(
+            user_name="Bob",
+            memories=[],
+            conversation_history=[],
+            onboarding_state={"completed": True},
+        )
+        assert "talked to you before" in system
+        assert "don't remember specifics" in system
+
+    def test_new_user_no_returning_greeting(self):
+        system, _ = build_context(
+            user_name="Alice",
+            memories=[],
+            conversation_history=[],
+            onboarding_state={"current_section": "welcome", "completed": False},
+        )
+        assert "talked to you before" not in system
+
     def test_context_is_reasonable_size(self):
         """Context should stay manageable for 4K token budget."""
         memories = [
