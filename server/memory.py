@@ -4,6 +4,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
+import string
+from datetime import datetime, timezone
 from typing import Any
 from pathlib import Path
 from uuid import UUID
@@ -21,6 +24,29 @@ MEMORY_CATEGORIES = [
     "family", "health", "preferences", "stories", "emotions",
     "meaning", "culture", "faith", "interests", "caregivers", "routine",
 ]
+
+# Correction patterns — signals the user is correcting a previous fact
+CORRECTION_PATTERNS = [
+    r"\bactually\b", r"\bno,?\s+it'?s\b", r"\bi meant\b",
+    r"\bnot\s+\w+,?\s+it'?s\b", r"\bcorrection\b",
+    r"\bthat'?s\s+(?:not\s+)?(?:right|wrong|incorrect)\b",
+    r"\bi\s+(?:was|am)\s+wrong\b",
+]
+
+# Stop words excluded from relevance scoring
+STOP_WORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "need", "dare", "ought",
+    "i", "me", "my", "we", "our", "you", "your", "he", "she", "it",
+    "they", "them", "his", "her", "its", "their", "what", "which", "who",
+    "whom", "this", "that", "these", "those", "am", "of", "in", "to",
+    "for", "with", "on", "at", "from", "by", "about", "as", "into",
+    "through", "during", "before", "after", "above", "below", "between",
+    "and", "but", "or", "nor", "not", "so", "very", "just", "how",
+    "all", "each", "every", "both", "few", "more", "most", "other",
+    "some", "such", "no", "only", "own", "same", "than", "too",
+})
 
 
 def _load_extraction_prompt() -> str:
@@ -103,32 +129,118 @@ Return ONLY valid JSON, no other text."""
         return []
 
 
+def _normalize_text(text: str) -> str:
+    """Normalize text for fuzzy comparison: lowercase, strip punctuation, remove articles."""
+    text = text.lower()
+    # Handle possessives before stripping punctuation
+    text = re.sub(r"'s\b", "", text)
+    text = text.translate(str.maketrans("", "", string.punctuation))
+    # Remove common filler words
+    text = re.sub(r"\b(a|an|the|is|are|was|my|his|her|their|our|name|named|called)\b", "", text)
+    return " ".join(text.split())
+
+
+def _fuzzy_match(a: str, b: str) -> bool:
+    """Check if two strings are near-duplicates.
+    
+    Returns True if one is a substring of the other OR word overlap > 70%.
+    """
+    norm_a = _normalize_text(a)
+    norm_b = _normalize_text(b)
+
+    if not norm_a or not norm_b:
+        return False
+
+    # Substring check
+    if norm_a in norm_b or norm_b in norm_a:
+        return True
+
+    # Word overlap check
+    words_a = set(norm_a.split())
+    words_b = set(norm_b.split())
+    if not words_a or not words_b:
+        return False
+    smaller = min(len(words_a), len(words_b))
+    overlap = len(words_a & words_b)
+    return (overlap / smaller) > 0.7
+
+
+def _is_correction(user_message: str) -> bool:
+    """Detect if the user message contains a correction pattern."""
+    msg_lower = user_message.lower()
+    return any(re.search(pat, msg_lower) for pat in CORRECTION_PATTERNS)
+
+
+def _recency_score(created_at: str | None, now: datetime | None = None) -> float:
+    """Calculate recency factor: 1.0 for today, decaying to 0.3 floor over 30 days."""
+    if not created_at:
+        return 0.3  # No timestamp → treat as old
+    try:
+        if now is None:
+            now = datetime.now(timezone.utc)
+        # Parse ISO timestamp
+        if isinstance(created_at, str):
+            ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        else:
+            ts = created_at
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        days_ago = (now - ts).total_seconds() / 86400
+        if days_ago <= 0:
+            return 1.0
+        if days_ago >= 30:
+            return 0.3
+        # Linear decay from 1.0 to 0.3 over 30 days
+        return 1.0 - (days_ago / 30) * 0.7
+    except (ValueError, TypeError):
+        return 0.3
+
+
 async def deduplicate_and_store(
     memories: list[dict[str, Any]],
     user_id: str,
     source_turn_id: str | None = None,
+    user_message: str | None = None,
 ) -> int:
-    """Deduplicate against existing memories and store new ones. Returns count stored."""
+    """Deduplicate against existing memories and store new ones. Returns count stored.
+    
+    Uses fuzzy matching for deduplication and correction-aware supersede logic.
+    """
     if not memories:
         return 0
 
     db = get_service_client()
     stored = 0
+    is_correction = _is_correction(user_message) if user_message else False
 
     for mem in memories:
-        # Simple dedup: check for exact content match in same category
-        existing = (
+        # Fetch all active memories in same category for fuzzy matching
+        existing_all = (
             db.table("memories")
-            .select("id")
+            .select("*")
             .eq("user_id", user_id)
             .eq("category", mem["category"])
-            .eq("content", mem["content"])
             .eq("active", True)
             .execute()
         )
 
-        if existing.data:
-            logger.debug(f"Duplicate memory skipped: {mem['content'][:50]}")
+        # Check for fuzzy duplicates
+        found_match = False
+        for existing_mem in (existing_all.data or []):
+            if _fuzzy_match(existing_mem["content"], mem["content"]):
+                if is_correction:
+                    # Supersede the old memory
+                    db.table("memories").update({"active": False}).eq("id", existing_mem["id"]).execute()
+                    logger.info(f"Superseded memory: [{existing_mem['content'][:50]}] → [{mem['content'][:50]}]")
+                else:
+                    # Plain duplicate — skip
+                    logger.debug(f"Duplicate memory skipped: {mem['content'][:50]}")
+                    found_match = True
+                    break
+
+        if found_match:
             continue
 
         # Store new memory
@@ -171,7 +283,7 @@ async def process_turn_memories(
             user_message, assistant_message, user_id, source_turn_id,
         )
         if memories:
-            await deduplicate_and_store(memories, user_id, source_turn_id)
+            await deduplicate_and_store(memories, user_id, source_turn_id, user_message=user_message)
         return memories
     except Exception as e:
         logger.error(f"Memory processing failed: {e}")
@@ -179,15 +291,29 @@ async def process_turn_memories(
 
 
 def get_user_memories(user_id: str, limit: int = 50) -> list[dict[str, Any]]:
-    """Fetch active memories for a user, ordered by importance."""
+    """Fetch active memories for a user, ordered by combined importance + recency score."""
     db = get_service_client()
+    # Fetch more than limit to allow re-ranking
+    fetch_limit = min(limit * 2, 200)
     result = (
         db.table("memories")
         .select("*")
         .eq("user_id", user_id)
         .eq("active", True)
         .order("importance", desc=True)
-        .limit(limit)
+        .limit(fetch_limit)
         .execute()
     )
-    return result.data or []
+    memories = result.data or []
+
+    # Re-rank with combined score: importance * 0.7 + recency * 0.3
+    now = datetime.now(timezone.utc)
+    for m in memories:
+        importance = m.get("importance", 3)
+        # Normalize importance to 0-1 scale (importance is 1-5)
+        importance_norm = importance / 5.0
+        recency = _recency_score(m.get("created_at"), now)
+        m["_score"] = importance_norm * 0.7 + recency * 0.3
+
+    memories.sort(key=lambda m: m.get("_score", 0), reverse=True)
+    return memories[:limit]

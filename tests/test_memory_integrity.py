@@ -101,8 +101,8 @@ class TestCorrectionHandling:
     async def test_correction_creates_new_memory(self):
         """When new info contradicts existing, old is superseded, new is created."""
         mock_db = MagicMock()
-        # Existing memory found
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [{
+        # Existing memory found (3 .eq() calls: user_id, category, active)
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [{
             "id": "old-id",
             "content": "daughter Sarah lives in Austin",
         }]
@@ -124,8 +124,8 @@ class TestImmutability:
     async def test_new_memory_stored_when_content_differs(self):
         """Non-duplicate content in same category creates new entry."""
         mock_db = MagicMock()
-        # No exact match found
-        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+        # No match found (3 .eq() calls: user_id, category, active)
+        mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
         mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock()
 
         with patch("server.memory.get_service_client", return_value=mock_db):

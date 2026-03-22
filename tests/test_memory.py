@@ -104,7 +104,7 @@ class TestDeduplication:
         mock_insert.data = [{"id": "new-id"}]
 
         mock_table = MagicMock()
-        mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = mock_select
+        mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = mock_select
         mock_table.insert.return_value.execute.return_value = mock_insert
 
         with patch("server.memory.get_service_client") as mock_db:
@@ -116,10 +116,10 @@ class TestDeduplication:
     @pytest.mark.asyncio
     async def test_skips_duplicate(self):
         mock_select = MagicMock()
-        mock_select.data = [{"id": "existing-id"}]  # Already exists
+        mock_select.data = [{"id": "existing-id", "content": "Has a dog named Max", "category": "family"}]
 
         mock_table = MagicMock()
-        mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = mock_select
+        mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = mock_select
 
         with patch("server.memory.get_service_client") as mock_db:
             mock_db.return_value.table.return_value = mock_table
