@@ -551,6 +551,49 @@ async def retention_status():
     return get_retention_status()
 
 
+# ─── Debug / Test Tools ──────────────────────────────────
+
+@app.post("/api/debug/reset-onboarding")
+async def reset_onboarding(user_id: str = Depends(require_auth)):
+    """Reset a user's onboarding state for testing. Auth-protected."""
+    db = get_service_client()
+    cleared = []
+
+    try:
+        # Delete messages (FK → conversations)
+        conv_result = db.table("conversations").select("id").eq("user_id", user_id).execute()
+        conv_ids = [c["id"] for c in (conv_result.data or [])]
+        if conv_ids:
+            db.table("messages").delete().in_("conversation_id", conv_ids).execute()
+            cleared.append(f"messages (from {len(conv_ids)} conversations)")
+
+        # Delete conversations
+        db.table("conversations").delete().eq("user_id", user_id).execute()
+        cleared.append("conversations")
+
+        # Delete memories
+        db.table("memories").delete().eq("user_id", user_id).execute()
+        cleared.append("memories")
+
+        # Reset onboarding state
+        db.table("users").update({
+            "onboarding_completed": False,
+            "onboarding_state": {
+                "current_section": "welcome",
+                "completed": False,
+                "section_turns": 0,
+            },
+        }).eq("id", user_id).execute()
+        cleared.append("onboarding_state")
+
+        logger.info(f"Onboarding reset for user {user_id}: {cleared}")
+        return {"status": "reset", "user_id": user_id, "cleared": cleared}
+
+    except Exception as e:
+        logger.error(f"Reset onboarding failed for {user_id}: {e}")
+        return {"status": "error", "detail": str(e)}
+
+
 # ─── Quality Metrics ─────────────────────────────────────
 
 @app.get("/api/quality-metrics")
@@ -1010,6 +1053,7 @@ async def voice_websocket(websocket: WebSocket):
     stt_degraded_since = None  # float (time.monotonic) when degraded mode started
     audio_frame_count = 0
     audio_codec = "pcm"  # "pcm" or "opus" — set by client in session_start
+    last_audio_frame_time: float = 0.0  # monotonic timestamp of last audio frame
 
     # Latency instrumentation timestamps
     t_session_start_received: float = 0.0
@@ -1077,7 +1121,12 @@ async def voice_websocket(websocket: WebSocket):
         interrupted = False
 
         if not transcript.strip():
-            # Empty transcript — send failure script
+            # Empty transcript — check if this is phantom noise (no recent audio frames)
+            if last_audio_frame_time > 0 and (time.monotonic() - last_audio_frame_time) > 3.0:
+                logger.info(f"Suppressing phantom empty transcript for {user_id} — last audio frame was {time.monotonic() - last_audio_frame_time:.1f}s ago")
+                await manager.send_status(user_id, "listening")
+                return
+            # Recent audio but empty transcript — send failure script
             script = get_failure_response("stt_failure", session_failure_count)
             session_failure_count += 1
             await _send_failure_as_voice(script)
@@ -1375,6 +1424,7 @@ async def voice_websocket(websocket: WebSocket):
                         try:
                             pcm_bytes = base64.b64decode(audio_data)
                             audio_frame_count += 1
+                            last_audio_frame_time = time.monotonic()
                             if audio_frame_count == 1:
                                 t_first_audio_frame = time.monotonic()
                                 logger.info(f"Audio stream started for {user_id}, first frame: {len(pcm_bytes)} bytes")
