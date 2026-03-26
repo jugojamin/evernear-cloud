@@ -29,6 +29,23 @@ from server.db.client import get_service_client
 
 logger = logging.getLogger(__name__)
 
+ONBOARDING_SECTIONS = [
+    "welcome",
+    "about_you",
+    "family",
+    "interests",
+    "daily_routine",
+    "health",
+    "preferences",
+    "caregivers",
+    "consent",
+    "faith",
+    "culture",
+    "stories",
+    "meaning",
+    "wrap_up",
+]
+
 
 class EverNearPipeline:
     """Voice conversation pipeline using streaming STT → LLM → TTS.
@@ -271,6 +288,12 @@ class EverNearPipeline:
         await self._store_message(user_text, "user", metrics)
         msg_id = await self._store_message(full_response, "assistant", metrics)
 
+        # Advance onboarding section if active
+        if onboarding_active:
+            asyncio.create_task(
+                self._advance_onboarding(onboarding_state)
+            )
+
         # Async memory extraction (fire and forget)
         asyncio.create_task(
             self._extract_memories(user_text, full_response, msg_id)
@@ -368,6 +391,40 @@ class EverNearPipeline:
             # TTS failure — return text only (Safety Architecture Rule #6)
 
         return response_text, audio_chunks, metrics
+
+    async def _advance_onboarding(self, onboarding_state: dict):
+        """Advance onboarding to next section every 2 turns. Fire and forget."""
+        try:
+            current = onboarding_state.get("current_section", "welcome")
+            section_turns = onboarding_state.get("section_turns", 0) + 1
+
+            if current not in ONBOARDING_SECTIONS:
+                current = "welcome"
+
+            new_state = dict(onboarding_state)
+            new_state["section_turns"] = section_turns
+
+            if section_turns >= 2:
+                # Advance to next section
+                idx = ONBOARDING_SECTIONS.index(current)
+                if idx + 1 < len(ONBOARDING_SECTIONS):
+                    next_section = ONBOARDING_SECTIONS[idx + 1]
+                    new_state["current_section"] = next_section
+                    new_state["section_turns"] = 0
+                    logger.info(f"Onboarding advance for {self.user_id}: {current} → {next_section}")
+                else:
+                    # Last section complete — mark onboarding done
+                    new_state["completed"] = True
+                    new_state["section_turns"] = 0
+                    logger.info(f"Onboarding completed for {self.user_id}")
+
+            db = get_service_client()
+            db.table("users").update({
+                "onboarding_state": new_state
+            }).eq("id", self.user_id).execute()
+
+        except Exception as e:
+            logger.error(f"Failed to advance onboarding for {self.user_id}: {e}")
 
     async def _store_message(
         self, content: str, role: str, metrics: TurnMetrics
