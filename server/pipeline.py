@@ -84,9 +84,24 @@ class EverNearPipeline:
         # Ensure conversation record exists (prevents FK constraint violations on messages)
         await self._ensure_conversation()
 
-        # Fetch user profile, memories, and build context
+        # Fetch user profile, memories, and build context (parallelized)
         metrics.start_context_build()
-        profile = await self._get_user_profile()
+
+        # Run profile fetch and memory fetch concurrently
+        profile_task = self._get_user_profile()
+        memories_result = await asyncio.gather(
+            profile_task,
+            asyncio.to_thread(get_user_memories, self.user_id),
+            return_exceptions=True,
+        )
+
+        profile = memories_result[0] if not isinstance(memories_result[0], Exception) else {"preferred_name": "friend"}
+        memories = memories_result[1] if not isinstance(memories_result[1], Exception) else []
+        if isinstance(memories_result[0], Exception):
+            logger.error(f"Profile fetch failed: {memories_result[0]}")
+        if isinstance(memories_result[1], Exception):
+            logger.error(f"Memory fetch failed: {memories_result[1]}")
+
         user_name = profile.get("preferred_name", "")
 
         # Load memory cache and caregiver context on first turn
@@ -105,7 +120,6 @@ class EverNearPipeline:
                 onboarding_state = json.loads(onboarding_state)
             except (json.JSONDecodeError, TypeError):
                 onboarding_state = {}
-        memories = get_user_memories(self.user_id)
 
         # STT already done (text mode) — mark it
         metrics.stt_ms = 0
@@ -265,9 +279,14 @@ class EverNearPipeline:
         return full_response, metrics
 
     async def process_voice_turn(
-        self, user_text: str
+        self, user_text: str, on_audio_chunk=None,
     ) -> tuple[str, list[bytes], TurnMetrics]:
         """Process a voice conversation turn — text pipeline + TTS.
+
+        If on_audio_chunk is provided, calls on_audio_chunk(chunk_48k, is_last)
+        for each TTS chunk as it arrives (streaming mode). Returns empty audio_chunks list.
+
+        If on_audio_chunk is None, buffers all chunks and returns them (legacy mode).
 
         Returns (response_text, audio_chunks_48k, metrics).
         Audio chunks are PCM16 at 48kHz for iOS playback.
@@ -294,11 +313,10 @@ class EverNearPipeline:
 
         try:
             metrics.start_tts()
-            voice_id = self._settings.tts_provider  # placeholder — voice selection is next task
-            # Use a known Cartesia voice ID or empty for default
             tts_voice = ""  # Let provider use its default
 
             first_chunk = True
+            chunks_collected: list[bytes] = []
             async for chunk in self._tts_router.synthesize(
                 text=response_text,
                 voice_id=tts_voice,
@@ -311,7 +329,19 @@ class EverNearPipeline:
                     first_chunk = False
                 # Resample 24kHz → 48kHz for iOS playback
                 chunk_48k = resample_24k_to_48k(chunk)
-                audio_chunks.append(chunk_48k)
+                chunks_collected.append(chunk_48k)
+
+                if on_audio_chunk:
+                    # Streaming mode: we don't know is_last yet during iteration,
+                    # so send with is_last=False. Caller handles final signaling.
+                    await on_audio_chunk(chunk_48k, False)
+
+            # Signal last chunk in streaming mode
+            if on_audio_chunk and chunks_collected:
+                # Re-signal last chunk with is_last=True
+                await on_audio_chunk(None, True)
+            elif not on_audio_chunk:
+                audio_chunks = chunks_collected
 
             metrics.end_tts()
 
@@ -333,7 +363,6 @@ class EverNearPipeline:
                 logger.warning(f"TTS degraded mode activated after {_main_mod.tts_consecutive_failures} consecutive failures")
                 log_incident("tts", "pipeline.py", f"TTS degraded mode activated after {_main_mod.tts_consecutive_failures} failures", fallback_triggered=True)
             # TTS failure — return text only (Safety Architecture Rule #6)
-            # audio_chunks stays empty, caller sends transcript only
 
         return response_text, audio_chunks, metrics
 

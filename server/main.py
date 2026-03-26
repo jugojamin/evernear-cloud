@@ -1087,10 +1087,60 @@ async def voice_websocket(websocket: WebSocket):
             await manager.send_status(user_id, "thinking")
 
             t_pipeline_start = time.monotonic()
-            response_text, audio_chunks, metrics = await pipeline.process_voice_turn(transcript)
+            t_first_audio_sent: float = 0.0
+            t_last_audio_sent: float = 0.0
+            sent_count = 0
+            speaking_started = False
+
+            async def _on_audio_chunk(chunk_48k: bytes | None, is_last: bool):
+                """Stream each TTS chunk to client as it arrives."""
+                nonlocal interrupted, sending_audio, sent_count, speaking_started
+                nonlocal t_first_audio_sent, t_last_audio_sent
+
+                if is_last and chunk_48k is None:
+                    # Final signal — send last marker on previous chunk
+                    if sent_count > 0:
+                        t_last_audio_sent = time.monotonic()
+                    sending_audio = False
+                    return
+
+                if interrupted:
+                    return
+
+                if not speaking_started:
+                    await manager.send_status(user_id, "speaking")
+                    speaking_started = True
+                    sending_audio = True
+
+                sent_count += 1
+                if sent_count == 1:
+                    t_first_audio_sent = time.monotonic()
+
+                await manager.send_json(user_id, {
+                    "type": "audio",
+                    "data": base64.b64encode(chunk_48k).decode("ascii"),
+                    "seq": sent_count,
+                })
+
+            response_text, audio_chunks, metrics = await pipeline.process_voice_turn(
+                transcript, on_audio_chunk=_on_audio_chunk
+            )
             t_pipeline_complete = time.monotonic()
 
-            # LLM succeeded if we got here — send transcript for display
+            # Send the last audio marker if we streamed chunks
+            if sent_count > 0:
+                t_last_audio_sent = time.monotonic()
+                # Send a final empty frame with last=True to signal end
+                await manager.send_json(user_id, {
+                    "type": "audio",
+                    "data": "",
+                    "seq": sent_count + 1,
+                    "last": True,
+                })
+
+            sending_audio = False
+
+            # Send transcript for display
             await manager.send_json(user_id, {
                 "type": "transcript",
                 "text": response_text,
@@ -1098,38 +1148,7 @@ async def voice_websocket(websocket: WebSocket):
                 "metrics": metrics.to_dict(),
             })
 
-            logger.info(f"Voice response for {user_id}: text={len(response_text)}ch, audio_chunks={len(audio_chunks) if audio_chunks else 0}, interrupted={interrupted}")
-            
-            t_first_audio_sent: float = 0.0
-            t_last_audio_sent: float = 0.0
-            if audio_chunks and not interrupted:
-                # Send audio frames
-                await manager.send_status(user_id, "speaking")
-                sending_audio = True
-                sent_count = 0
-
-                for i, chunk in enumerate(audio_chunks):
-                    if interrupted:
-                        logger.info(f"Audio send interrupted at frame {i}")
-                        break
-                    is_last = (i == len(audio_chunks) - 1)
-                    await manager.send_json(user_id, {
-                        "type": "audio",
-                        "data": base64.b64encode(chunk).decode("ascii"),
-                        "seq": i + 1,
-                        **({"last": True} if is_last else {}),
-                    })
-                    if sent_count == 0:
-                        t_first_audio_sent = time.monotonic()
-                    sent_count += 1
-
-                t_last_audio_sent = time.monotonic()
-                sending_audio = False
-                logger.info(f"Sent {sent_count} audio frames to {user_id}")
-            elif not audio_chunks:
-                logger.warning(f"No audio chunks from TTS for {user_id}")
-            elif interrupted:
-                logger.info(f"Skipped audio send — interrupted for {user_id}")
+            logger.info(f"Voice response for {user_id}: text={len(response_text)}ch, streamed_chunks={sent_count}, interrupted={interrupted}")
 
             # Emit structured latency trace
             _emit_latency_trace(
