@@ -95,6 +95,62 @@ async def health():
     return JSONResponse(content=body, status_code=503 if all_degraded else 200)
 
 
+# ─── Latency Trace ───────────────────────────────────────
+
+import collections
+
+_latency_traces: collections.deque = collections.deque(maxlen=20)
+
+
+def _ms(start: float, end: float) -> int:
+    """Convert monotonic timestamp delta to milliseconds. Returns 0 if either is unset."""
+    if start > 0 and end > 0:
+        return int((end - start) * 1000)
+    return 0
+
+
+def _emit_latency_trace(
+    *,
+    user_id: str,
+    turn: int,
+    t_ws_accept: float,
+    t_session_start_received: float,
+    t_stt_init_complete: float,
+    t_first_audio_frame: float,
+    t_transcript_received: float,
+    t_pipeline_start: float,
+    t_pipeline_complete: float,
+    t_first_audio_sent: float,
+    t_last_audio_sent: float,
+    metrics: Any,
+    response_text: str,
+):
+    trace = {
+        "user_id": user_id,
+        "turn": turn,
+        "ws_to_session_start_ms": _ms(t_ws_accept, t_session_start_received),
+        "stt_init_ms": _ms(t_session_start_received, t_stt_init_complete),
+        "first_audio_to_transcript_ms": _ms(t_first_audio_frame, t_transcript_received),
+        "context_build_ms": metrics.context_build_ms,
+        "llm_ttft_ms": metrics.llm_ttft_ms,
+        "llm_total_ms": metrics.llm_total_ms,
+        "tts_ttfb_ms": metrics.tts_ttfb_ms,
+        "tts_total_ms": metrics.tts_total_ms,
+        "transcript_to_first_audio_sent_ms": _ms(t_transcript_received, t_first_audio_sent),
+        "total_pipeline_ms": _ms(t_pipeline_start, t_pipeline_complete),
+        "response_length_chars": len(response_text),
+        "model_used": metrics.model_used,
+    }
+    _latency_traces.append(trace)
+    logger.info(f"LATENCY_TRACE: {json.dumps(trace)}")
+
+
+@app.get("/api/latency-trace")
+async def latency_trace():
+    """Last 20 latency traces, newest first. Read-only."""
+    return list(reversed(_latency_traces))
+
+
 @app.get("/api/runtime-status")
 async def runtime_status():
     """Runtime health status for Mission Control."""
@@ -938,6 +994,7 @@ async def voice_websocket(websocket: WebSocket):
         await websocket.close(code=4429, reason="Too many connections")
         return
 
+    t_ws_accept = time.monotonic()
     session = await manager.connect(websocket, user_id)
     pipeline = EverNearPipeline(user_id=user_id)
     logger.info(f"Session state for {user_id}: llm_degraded={llm_degraded_global}, stt_degraded={stt_degraded_global}, tts_degraded={tts_degraded_global}")
@@ -953,6 +1010,11 @@ async def voice_websocket(websocket: WebSocket):
     stt_degraded_since = None  # float (time.monotonic) when degraded mode started
     audio_frame_count = 0
     audio_codec = "pcm"  # "pcm" or "opus" — set by client in session_start
+
+    # Latency instrumentation timestamps
+    t_session_start_received: float = 0.0
+    t_stt_init_complete: float = 0.0
+    t_first_audio_frame: float = 0.0
 
     async def _send_nudge_tts(text: str):
         """Send a short text as TTS audio to the user."""
@@ -981,7 +1043,10 @@ async def voice_websocket(websocket: WebSocket):
         """Process a final STT transcript through the voice pipeline."""
         nonlocal interrupted, sending_audio, session_failure_count, stt_session
         nonlocal transcript_timeout_task, stt_consecutive_failures, stt_degraded, stt_degraded_since
+        nonlocal t_first_audio_frame
         global stt_degraded_global
+
+        t_transcript_received = time.monotonic()
 
         # Mark any pending check-in as responded
         from server.checkin_log import mark_responded
@@ -1021,7 +1086,9 @@ async def voice_websocket(websocket: WebSocket):
         try:
             await manager.send_status(user_id, "thinking")
 
+            t_pipeline_start = time.monotonic()
             response_text, audio_chunks, metrics = await pipeline.process_voice_turn(transcript)
+            t_pipeline_complete = time.monotonic()
 
             # LLM succeeded if we got here — send transcript for display
             await manager.send_json(user_id, {
@@ -1033,6 +1100,8 @@ async def voice_websocket(websocket: WebSocket):
 
             logger.info(f"Voice response for {user_id}: text={len(response_text)}ch, audio_chunks={len(audio_chunks) if audio_chunks else 0}, interrupted={interrupted}")
             
+            t_first_audio_sent: float = 0.0
+            t_last_audio_sent: float = 0.0
             if audio_chunks and not interrupted:
                 # Send audio frames
                 await manager.send_status(user_id, "speaking")
@@ -1050,14 +1119,34 @@ async def voice_websocket(websocket: WebSocket):
                         "seq": i + 1,
                         **({"last": True} if is_last else {}),
                     })
+                    if sent_count == 0:
+                        t_first_audio_sent = time.monotonic()
                     sent_count += 1
 
+                t_last_audio_sent = time.monotonic()
                 sending_audio = False
                 logger.info(f"Sent {sent_count} audio frames to {user_id}")
             elif not audio_chunks:
                 logger.warning(f"No audio chunks from TTS for {user_id}")
             elif interrupted:
                 logger.info(f"Skipped audio send — interrupted for {user_id}")
+
+            # Emit structured latency trace
+            _emit_latency_trace(
+                user_id=user_id,
+                turn=pipeline.turn_count,
+                t_ws_accept=t_ws_accept,
+                t_session_start_received=t_session_start_received,
+                t_stt_init_complete=t_stt_init_complete,
+                t_first_audio_frame=t_first_audio_frame,
+                t_transcript_received=t_transcript_received,
+                t_pipeline_start=t_pipeline_start,
+                t_pipeline_complete=t_pipeline_complete,
+                t_first_audio_sent=t_first_audio_sent,
+                t_last_audio_sent=t_last_audio_sent,
+                metrics=metrics,
+                response_text=response_text,
+            )
 
             # Back to listening
             interrupted = False
@@ -1155,6 +1244,7 @@ async def voice_websocket(websocket: WebSocket):
                     continue
 
             if msg_type == "session_start":
+                t_session_start_received = time.monotonic()
                 # Detect codec from client (default: pcm for backward compat)
                 audio_codec = data.get("codec", "pcm")
                 logger.info(f"Session start for {user_id}, codec={audio_codec}")
@@ -1164,6 +1254,7 @@ async def voice_websocket(websocket: WebSocket):
                     codec=audio_codec,
                 )
                 stt_started = await stt_session.start()
+                t_stt_init_complete = time.monotonic()
                 if not stt_started:
                     logger.warning(f"STT unavailable for {user_id} — text mode only")
                 await manager.send_status(user_id, "listening")
@@ -1233,6 +1324,7 @@ async def voice_websocket(websocket: WebSocket):
                             pcm_bytes = base64.b64decode(audio_data)
                             audio_frame_count += 1
                             if audio_frame_count == 1:
+                                t_first_audio_frame = time.monotonic()
                                 logger.info(f"Audio stream started for {user_id}, first frame: {len(pcm_bytes)} bytes")
                             await stt_session.send_audio(pcm_bytes)
                         except Exception as e:

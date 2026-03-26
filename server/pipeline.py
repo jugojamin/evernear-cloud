@@ -84,7 +84,8 @@ class EverNearPipeline:
         # Ensure conversation record exists (prevents FK constraint violations on messages)
         await self._ensure_conversation()
 
-        # Fetch user profile and memories
+        # Fetch user profile, memories, and build context
+        metrics.start_context_build()
         profile = await self._get_user_profile()
         user_name = profile.get("preferred_name", "")
 
@@ -136,6 +137,8 @@ class EverNearPipeline:
             max_turns=self._settings.conversation_history_turns,
             user_message=user_text,
         )
+
+        metrics.end_context_build()
 
         # Add user message to history
         history.append({"role": "user", "content": user_text})
@@ -309,6 +312,8 @@ class EverNearPipeline:
                 # Resample 24kHz → 48kHz for iOS playback
                 chunk_48k = resample_24k_to_48k(chunk)
                 audio_chunks.append(chunk_48k)
+
+            metrics.end_tts()
 
             # TTS succeeded — reset counter
             _main_mod.tts_consecutive_failures = 0

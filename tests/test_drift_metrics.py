@@ -52,6 +52,7 @@ class TestMetricsLogged:
         m = TurnMetrics()
         d = m.to_dict()
         expected = {"stt_ms", "llm_ttft_ms", "llm_total_ms", "tts_ttfb_ms",
+                    "context_build_ms", "tts_total_ms",
                     "total_ms", "model_used", "tts_provider", "sonnet_reason"}
         assert set(d.keys()) == expected
 

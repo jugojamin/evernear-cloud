@@ -16,6 +16,8 @@ class TurnMetrics:
     llm_ttft_ms: int = 0
     llm_total_ms: int = 0
     tts_ttfb_ms: int = 0
+    context_build_ms: int = 0
+    tts_total_ms: int = 0
     total_ms: int = 0
     model_used: str = "haiku-4.5"
     tts_provider: str = "cartesia"
@@ -28,6 +30,8 @@ class TurnMetrics:
     _llm_first_token: float = field(default=0.0, repr=False)
     _tts_start: float = field(default=0.0, repr=False)
     _tts_first_byte: float = field(default=0.0, repr=False)
+    _context_build_start: float = field(default=0.0, repr=False)
+    _tts_end: float = field(default=0.0, repr=False)
 
     def start_turn(self):
         self._start_time = time.monotonic()
@@ -51,6 +55,13 @@ class TurnMetrics:
         if self._llm_start:
             self.llm_total_ms = int((time.monotonic() - self._llm_start) * 1000)
 
+    def start_context_build(self):
+        self._context_build_start = time.monotonic()
+
+    def end_context_build(self):
+        if self._context_build_start:
+            self.context_build_ms = int((time.monotonic() - self._context_build_start) * 1000)
+
     def start_tts(self):
         self._tts_start = time.monotonic()
 
@@ -58,6 +69,11 @@ class TurnMetrics:
         if self._tts_start:
             self._tts_first_byte = time.monotonic()
             self.tts_ttfb_ms = int((self._tts_first_byte - self._tts_start) * 1000)
+
+    def end_tts(self):
+        if self._tts_start:
+            self._tts_end = time.monotonic()
+            self.tts_total_ms = int((self._tts_end - self._tts_start) * 1000)
 
     def end_turn(self):
         if self._start_time:
@@ -69,6 +85,8 @@ class TurnMetrics:
             "llm_ttft_ms": self.llm_ttft_ms,
             "llm_total_ms": self.llm_total_ms,
             "tts_ttfb_ms": self.tts_ttfb_ms,
+            "context_build_ms": self.context_build_ms,
+            "tts_total_ms": self.tts_total_ms,
             "total_ms": self.total_ms,
             "model_used": self.model_used,
             "tts_provider": self.tts_provider,
@@ -86,6 +104,8 @@ class TurnMetrics:
             alerts.append(f"ALERT: llm_ttft_ms={self.llm_ttft_ms} exceeds 700ms threshold")
         if self.tts_ttfb_ms > 250:
             alerts.append(f"ALERT: tts_ttfb_ms={self.tts_ttfb_ms} exceeds 250ms threshold")
+        if self.context_build_ms > 500:
+            alerts.append(f"ALERT: context_build_ms={self.context_build_ms} exceeds 500ms threshold")
         for a in alerts:
             logger.warning(a)
         return alerts
