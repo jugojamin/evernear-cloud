@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # TTS
     tts_provider: str = "cartesia"  # cartesia | elevenlabs
     tts_voice_id: str = "6d287143-8db3-434a-959c-df147192da27"  # Cartesia "Stacy - Mentor" (candidate 9)
-    tts_speed: float = 0.85  # Cartesia speed (0.6-1.5, default 1.0) — slowed for elderly users
+    tts_speed: float = 0.95  # Cartesia speed (0.6-1.5, default 1.0) — slightly slowed for elderly users
     tts_emotion: str = "calm"  # Cartesia emotion baseline
 
     # APNs (deferred)
@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Pipeline tuning
-    vad_silence_ms: int = 1800  # 1.8s for elderly users
+    vad_silence_ms: int = 2500  # 2.5s for elderly users — avoids cutting off mid-sentence
     llm_max_tokens: int = 200
     max_context_tokens: int = 4000
     conversation_history_turns: int = 8
