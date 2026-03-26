@@ -26,9 +26,11 @@ class TTSProvider(ABC):
 class CartesiaTTSProvider(TTSProvider):
     """Cartesia Sonic TTS provider."""
 
-    def __init__(self, api_key: str, default_voice_id: str = ""):
+    def __init__(self, api_key: str, default_voice_id: str = "", speed: float = 0.85, emotion: str = "calm"):
         self.api_key = api_key
         self.default_voice_id = default_voice_id
+        self._speed = speed
+        self._emotion = emotion
 
     @property
     def name(self) -> str:
@@ -56,6 +58,10 @@ class CartesiaTTSProvider(TTSProvider):
                         "container": "raw",
                         "encoding": "pcm_s16le",
                         "sample_rate": 24000,
+                    },
+                    "generation_config": {
+                        "speed": self._speed,
+                        "emotion": self._emotion,
                     },
                 },
                 timeout=30.0,

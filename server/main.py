@@ -1091,6 +1091,30 @@ async def voice_websocket(websocket: WebSocket):
             t_last_audio_sent: float = 0.0
             sent_count = 0
             speaking_started = False
+            _initial_buffer: list[bytes] = []
+            _BUFFER_SIZE = 3  # Batch first N chunks for smooth iOS playback
+
+            async def _flush_buffer():
+                """Send all buffered chunks to client."""
+                nonlocal sent_count, speaking_started, sending_audio, t_first_audio_sent
+                if not _initial_buffer:
+                    return
+                if not speaking_started:
+                    await manager.send_status(user_id, "speaking")
+                    speaking_started = True
+                    sending_audio = True
+                for chunk in _initial_buffer:
+                    if interrupted:
+                        break
+                    sent_count += 1
+                    if sent_count == 1:
+                        t_first_audio_sent = time.monotonic()
+                    await manager.send_json(user_id, {
+                        "type": "audio",
+                        "data": base64.b64encode(chunk).decode("ascii"),
+                        "seq": sent_count,
+                    })
+                _initial_buffer.clear()
 
             async def _on_audio_chunk(chunk_48k: bytes | None, is_last: bool):
                 """Stream each TTS chunk to client as it arrives."""
@@ -1098,7 +1122,8 @@ async def voice_websocket(websocket: WebSocket):
                 nonlocal t_first_audio_sent, t_last_audio_sent
 
                 if is_last and chunk_48k is None:
-                    # Final signal — send last marker on previous chunk
+                    # Final signal — flush any remaining buffer, then mark done
+                    await _flush_buffer()
                     if sent_count > 0:
                         t_last_audio_sent = time.monotonic()
                     sending_audio = False
@@ -1107,6 +1132,14 @@ async def voice_websocket(websocket: WebSocket):
                 if interrupted:
                     return
 
+                # Buffer first N chunks for smooth playback
+                if len(_initial_buffer) < _BUFFER_SIZE:
+                    _initial_buffer.append(chunk_48k)
+                    if len(_initial_buffer) == _BUFFER_SIZE:
+                        await _flush_buffer()
+                    return
+
+                # Stream remaining chunks immediately
                 if not speaking_started:
                     await manager.send_status(user_id, "speaking")
                     speaking_started = True

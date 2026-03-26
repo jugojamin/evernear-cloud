@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     # TTS
     tts_provider: str = "cartesia"  # cartesia | elevenlabs
     tts_voice_id: str = "6d287143-8db3-434a-959c-df147192da27"  # Cartesia "Stacy - Mentor" (candidate 9)
+    tts_speed: float = 0.85  # Cartesia speed (0.6-1.5, default 1.0) — slowed for elderly users
+    tts_emotion: str = "calm"  # Cartesia emotion baseline
 
     # APNs (deferred)
     apns_key_id: str = ""

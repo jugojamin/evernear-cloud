@@ -54,7 +54,10 @@ class EverNearPipeline:
         self._anthropic = anthropic.AsyncAnthropic(api_key=s.anthropic_api_key)
 
         # TTS setup
-        tts_provider = CartesiaTTSProvider(api_key=s.cartesia_api_key, default_voice_id=s.tts_voice_id)
+        tts_provider = CartesiaTTSProvider(
+            api_key=s.cartesia_api_key, default_voice_id=s.tts_voice_id,
+            speed=s.tts_speed, emotion=s.tts_emotion,
+        )
         self._tts_router = TTSRouter(premium_provider=tts_provider)
         self._settings = s
 
