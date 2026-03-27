@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     supabase_service_key: str = ""
 
     # TTS
-    tts_provider: str = "cartesia"  # cartesia | elevenlabs
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = ""  # Set via ELEVENLABS_VOICE_ID env var
+    tts_provider: str = "elevenlabs"  # cartesia | elevenlabs
     tts_voice_id: str = "6d287143-8db3-434a-959c-df147192da27"  # Cartesia "Stacy - Mentor" (candidate 9)
     tts_speed: float = 0.95  # Cartesia speed (0.6-1.5, default 1.0) — slightly slowed for elderly users
     tts_emotion: str = "calm"  # Cartesia emotion baseline

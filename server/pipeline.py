@@ -22,7 +22,7 @@ from server.metrics import TurnMetrics
 from server.audio_bridge import resample_24k_to_48k
 from server.failure_scripts import get_failure_response
 from server.routers.llm_router import route_llm, RoutingDecision
-from server.routers.tts_router import CartesiaTTSProvider, TTSRouter, TTSRoutingContext
+from server.routers.tts_router import CartesiaTTSProvider, ElevenLabsTTSProvider, TTSRouter, TTSRoutingContext
 from server.validator import ResponseValidator, SessionContext, ValidationAction
 from server.incident_log import log_incident
 from server.db.client import get_service_client
@@ -70,12 +70,26 @@ class EverNearPipeline:
         s = get_settings()
         self._anthropic = anthropic.AsyncAnthropic(api_key=s.anthropic_api_key)
 
-        # TTS setup
-        tts_provider = CartesiaTTSProvider(
-            api_key=s.cartesia_api_key, default_voice_id=s.tts_voice_id,
-            speed=s.tts_speed, emotion=s.tts_emotion,
-        )
-        self._tts_router = TTSRouter(premium_provider=tts_provider)
+        # TTS setup — primary provider based on config, fallback if both keys available
+        if s.tts_provider == "elevenlabs" and s.elevenlabs_api_key:
+            primary = ElevenLabsTTSProvider(
+                api_key=s.elevenlabs_api_key,
+                default_voice_id=s.elevenlabs_voice_id or s.tts_voice_id,
+            )
+            fallback = CartesiaTTSProvider(
+                api_key=s.cartesia_api_key, default_voice_id=s.tts_voice_id,
+                speed=s.tts_speed, emotion=s.tts_emotion,
+            ) if s.cartesia_api_key else None
+        else:
+            primary = CartesiaTTSProvider(
+                api_key=s.cartesia_api_key, default_voice_id=s.tts_voice_id,
+                speed=s.tts_speed, emotion=s.tts_emotion,
+            )
+            fallback = ElevenLabsTTSProvider(
+                api_key=s.elevenlabs_api_key,
+                default_voice_id=s.elevenlabs_voice_id or s.tts_voice_id,
+            ) if s.elevenlabs_api_key else None
+        self._tts_router = TTSRouter(premium_provider=primary, standard_provider=fallback)
         self._settings = s
 
     async def _get_user_profile(self) -> dict[str, Any]:

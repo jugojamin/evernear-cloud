@@ -71,6 +71,43 @@ class CartesiaTTSProvider(TTSProvider):
                     yield chunk
 
 
+class ElevenLabsTTSProvider(TTSProvider):
+    """ElevenLabs TTS provider — streaming PCM s16le 24kHz."""
+
+    def __init__(self, api_key: str, default_voice_id: str = ""):
+        self.api_key = api_key
+        self.default_voice_id = default_voice_id
+
+    @property
+    def name(self) -> str:
+        return "elevenlabs"
+
+    async def synthesize(self, text: str, voice_id: str = "") -> AsyncIterator[bytes]:
+        """Synthesize via ElevenLabs streaming API."""
+        import httpx
+
+        vid = voice_id or self.default_voice_id
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{vid}/stream"
+        async with httpx.AsyncClient() as client:
+            async with client.stream(
+                "POST",
+                url,
+                params={"output_format": "pcm_24000"},
+                headers={
+                    "xi-api-key": self.api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "text": text,
+                    "model_id": "eleven_turbo_v2_5",
+                },
+                timeout=30.0,
+            ) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes(4096):
+                    yield chunk
+
+
 @dataclass
 class TTSRoutingContext:
     """Context for deciding premium vs standard TTS."""
