@@ -1121,12 +1121,18 @@ async def voice_websocket(websocket: WebSocket):
         interrupted = False
 
         if not transcript.strip():
-            # Empty transcript — check if this is phantom noise (no recent audio frames)
-            if last_audio_frame_time > 0 and (time.monotonic() - last_audio_frame_time) > 3.0:
-                logger.info(f"Suppressing phantom empty transcript for {user_id} — last audio frame was {time.monotonic() - last_audio_frame_time:.1f}s ago")
+            # Empty transcript — suppress if too few audio frames (phantom noise / no real speech)
+            # 15 frames ≈ 0.5s of speech at typical chunk rates
+            if audio_frame_count < 15:
+                logger.info(f"Suppressing phantom empty transcript for {user_id} — only {audio_frame_count} audio frames (< 15 threshold)")
                 await manager.send_status(user_id, "listening")
                 return
-            # Recent audio but empty transcript — send failure script
+            # Secondary check: no recent audio (stale STT session)
+            if last_audio_frame_time > 0 and (time.monotonic() - last_audio_frame_time) > 3.0:
+                logger.info(f"Suppressing stale empty transcript for {user_id} — last audio frame was {time.monotonic() - last_audio_frame_time:.1f}s ago")
+                await manager.send_status(user_id, "listening")
+                return
+            # Genuine speech but empty transcript — send failure script
             script = get_failure_response("stt_failure", session_failure_count)
             session_failure_count += 1
             await _send_failure_as_voice(script)

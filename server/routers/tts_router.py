@@ -85,14 +85,20 @@ class ElevenLabsTTSProvider(TTSProvider):
     async def synthesize(self, text: str, voice_id: str = "") -> AsyncIterator[bytes]:
         """Synthesize via ElevenLabs streaming API."""
         import httpx
+        import time as _time
 
         vid = voice_id or self.default_voice_id
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{vid}/stream"
+        t_request_start = _time.monotonic()
+        t_first_byte = 0.0
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "POST",
                 url,
-                params={"output_format": "pcm_24000"},
+                params={
+                    "output_format": "pcm_24000",
+                    "optimize_streaming_latency": "4",
+                },
                 headers={
                     "xi-api-key": self.api_key,
                     "Content-Type": "application/json",
@@ -105,7 +111,16 @@ class ElevenLabsTTSProvider(TTSProvider):
             ) as resp:
                 resp.raise_for_status()
                 async for chunk in resp.aiter_bytes(4096):
+                    if not t_first_byte:
+                        t_first_byte = _time.monotonic()
                     yield chunk
+        t_complete = _time.monotonic()
+        logger.info(
+            f"ELEVENLABS_TRACE: request_ms={int((t_first_byte - t_request_start) * 1000) if t_first_byte else -1}, "
+            f"ttfb_ms={int((t_first_byte - t_request_start) * 1000) if t_first_byte else -1}, "
+            f"total_ms={int((t_complete - t_request_start) * 1000)}, "
+            f"text_length={len(text)}, voice_id={vid}"
+        )
 
 
 @dataclass
