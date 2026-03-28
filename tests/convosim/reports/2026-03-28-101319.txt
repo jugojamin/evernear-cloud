@@ -1,0 +1,17 @@
+======================================================================
+CONVOSIM REPORT — 2026-03-28 10:13:19
+======================================================================
+  personas: 1
+  turns_per_persona: 5
+  ws_url: wss://evernear-api.fly.dev/ws/voice
+
+SUMMARY: 1 personas — ✅ 0 pass, ⚠️ 1 warning, ❌ 0 fail
+----------------------------------------------------------------------
+
+⚠️ fall_report_james — 5 turns, 0 fails, 2 warnings
+    Turn 2 [WARNING] question_stacking: 2 questions in one response
+    Turn 3 [WARNING] question_stacking: 2 questions in one response
+
+======================================================================
+END OF REPORT
+======================================================================

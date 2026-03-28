@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -127,18 +128,34 @@ def format_conversation_history(
 
 
 def get_time_awareness() -> str:
-    """Generate time-of-day context for natural conversation."""
-    hour = datetime.now().hour
+    """Generate time-of-day context for natural conversation.
+    
+    Uses USER_TIMEZONE env var (default: America/Chicago) for correct local time.
+    """
+    import os
+    tz_name = os.environ.get("USER_TIMEZONE", "America/Chicago")
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        logger.warning(f"Invalid USER_TIMEZONE '{tz_name}', falling back to America/Chicago")
+        tz = ZoneInfo("America/Chicago")
+    
+    now = datetime.now(tz)
+    hour = now.hour
+    time_str = now.strftime("%A, %B %d, %Y at %I:%M %p %Z")
+    
     if hour < 6:
-        return "It's very early morning (before 6am). The person may have trouble sleeping."
+        tone = "It's very early morning (before 6am). The person may have trouble sleeping."
     elif hour < 12:
-        return "It's morning. A warm good morning greeting is appropriate if this is the first conversation today."
+        tone = "It's morning. A warm good morning greeting is appropriate if this is the first conversation today."
     elif hour < 17:
-        return "It's afternoon."
+        tone = "It's afternoon."
     elif hour < 21:
-        return "It's evening. A calmer, wind-down tone is appropriate."
+        tone = "It's evening. A calmer, wind-down tone is appropriate."
     else:
-        return "It's late evening/night. Be gentle and calming."
+        tone = "It's late evening/night. Be gentle and calming."
+    
+    return f"The current date and time for the user is: {time_str}. {tone}"
 
 
 def build_context(
