@@ -1123,9 +1123,9 @@ async def voice_websocket(websocket: WebSocket):
 
         if not transcript.strip():
             # Empty transcript — suppress if too few audio frames (phantom noise / no real speech)
-            # 50 frames ≈ 1.7s of audio — below any real speech attempt
-            if audio_frame_count < 50:
-                logger.info(f"Suppressing phantom empty transcript for {user_id} — only {audio_frame_count} audio frames (< 50 threshold)")
+            # 10 frames ≈ 0.3s of audio — catches noise-only, dedup guard handles doubled scripts
+            if audio_frame_count < 10:
+                logger.info(f"Suppressing phantom empty transcript for {user_id} — only {audio_frame_count} audio frames (< 10 threshold)")
                 audio_frame_count = 0
                 await manager.send_status(user_id, "listening")
                 return
@@ -1460,9 +1460,9 @@ async def voice_websocket(websocket: WebSocket):
                     logger.info(f"end_of_speech received for {user_id} — {frames_at_eos} frames forwarded, calling finalize()")
                     audio_frame_count = 0
 
-                    # If 0 frames forwarded, no chance of a valid transcript — skip the 10s wait
-                    if frames_at_eos < 50:
-                        logger.info(f"Suppressing transcript timeout for {user_id} — only {frames_at_eos} frames (< 50 threshold), returning to listening")
+                    # If nearly 0 frames forwarded, no chance of a valid transcript — skip the 10s wait
+                    if frames_at_eos < 5:
+                        logger.info(f"Suppressing transcript timeout for {user_id} — only {frames_at_eos} frames (< 5 threshold), returning to listening")
                         await manager.send_status(user_id, "listening")
                     else:
                         await stt_session.finalize()
