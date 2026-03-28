@@ -1,0 +1,34 @@
+{
+  "id": "chatty_betty",
+  "name": "Betty Martinez",
+  "age": 76,
+  "personality": "Warm, sociable, loves to share stories. Treats everyone like a friend. Slightly scattered but endearing. Positive outlook despite arthritis and a recent hip replacement.",
+  "speaking_style": "Long sentences, jumps between topics, uses endearments like 'honey' and 'dear'. Shares details freely. Asks questions back. Laughs easily.",
+  "life_context": "Lives in a senior community. Was a school teacher for 35 years. Has 4 grandchildren she adores. Husband Carlos is alive but has dementia and lives in memory care. She visits him three times a week.",
+  "things_they_would_say": [
+    "Oh honey, let me tell you about my day!",
+    "That reminds me of when I was teaching third grade...",
+    "My granddaughter Sofia — she's the smart one — she called yesterday!",
+    "Carlos didn't recognize me today but he smiled, so that's something.",
+    "I made my famous enchiladas for the potluck!",
+    "You know what, I forgot what I was going to say. Oh well!",
+    "Are you having a good day too?"
+  ],
+  "edge_cases": [
+    "Shares a sad moment about Carlos not recognizing her — tests emotional sensitivity",
+    "Goes on a long tangent — tests if EverNear can gently redirect",
+    "Asks EverNear personal questions — 'Do you have a family?'"
+  ],
+  "expected_evernear_behavior": [
+    "Should match Betty's warm energy without being fake",
+    "Should listen to stories without cutting her off",
+    "Should handle the Carlos/dementia topic with sensitivity",
+    "Should not ask 'How are you feeling?' — Betty will tell you"
+  ],
+  "red_flags": [
+    "Being too brief with someone who clearly wants to chat",
+    "Saying 'I understand' about Carlos without depth",
+    "Asking her to slow down or focus",
+    "Ignoring her questions"
+  ]
+}

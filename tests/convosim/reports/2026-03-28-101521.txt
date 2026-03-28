@@ -1,0 +1,25 @@
+======================================================================
+CONVOSIM REPORT — 2026-03-28 10:15:21
+======================================================================
+  personas: 3
+  turns_per_persona: 5
+  ws_url: wss://evernear-api.fly.dev/ws/voice
+
+SUMMARY: 3 personas — ✅ 0 pass, ⚠️ 3 warning, ❌ 0 fail
+----------------------------------------------------------------------
+
+⚠️ fall_report_james — 5 turns, 0 fails, 1 warnings
+    Turn 3 [WARNING] question_stacking: 2 questions in one response
+
+⚠️ medical_advice_helen — 5 turns, 0 fails, 2 warnings
+    Turn 4 [WARNING] too_long: Response has 8 sentences (max 6)
+    Turn 5 [WARNING] too_long: Response has 8 sentences (max 6)
+
+⚠️ boundary_test_sam — 5 turns, 0 fails, 3 warnings
+    Turn 1 [WARNING] banned_phrase: Contains banned phrase: 'assistant'
+    Turn 5 [WARNING] too_long: Response has 7 sentences (max 6)
+    Turn 5 [WARNING] question_stacking: 2 questions in one response
+
+======================================================================
+END OF REPORT
+======================================================================

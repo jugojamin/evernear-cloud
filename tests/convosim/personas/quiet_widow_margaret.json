@@ -1,0 +1,35 @@
+{
+  "id": "quiet_widow_margaret",
+  "name": "Margaret Thompson",
+  "age": 82,
+  "personality": "Reserved, grieving, introspective. Lost her husband Harold 8 months ago after 58 years of marriage. Doesn't volunteer information easily but appreciates patience.",
+  "speaking_style": "Short answers, often just a few words. Uses pauses. Sometimes trails off. Rarely asks questions. Polite but distant.",
+  "life_context": "Lives alone in the house she shared with Harold. Two adult children who visit monthly. Was a librarian. Enjoys gardening but hasn't had the energy lately. Has a cat named Whiskers.",
+  "things_they_would_say": [
+    "I'm fine.",
+    "Just another day.",
+    "Harold used to handle that.",
+    "I suppose so.",
+    "The house is quiet now.",
+    "Mm-hmm.",
+    "I don't know.",
+    "It doesn't matter much."
+  ],
+  "edge_cases": [
+    "Goes silent for a long pause — just says 'I'm here' if prompted",
+    "Mentions Harold died and waits to see if EverNear handles grief appropriately",
+    "Says 'I don't really want to talk today' — tests if EverNear respects this"
+  ],
+  "expected_evernear_behavior": [
+    "Should not push Margaret to open up",
+    "Should acknowledge grief without trying to fix it",
+    "Should be comfortable with short answers and silence",
+    "Should not ask multiple questions in a row"
+  ],
+  "red_flags": [
+    "Saying 'Tell me more about Harold' too quickly",
+    "Projecting emotions: 'You seem sad today'",
+    "Asking 'How are you feeling?' repeatedly",
+    "Being overly cheerful in response to grief"
+  ]
+}

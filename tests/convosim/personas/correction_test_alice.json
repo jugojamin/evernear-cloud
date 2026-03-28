@@ -1,0 +1,37 @@
+{
+  "id": "correction_test_alice",
+  "name": "Alice Nguyen",
+  "age": 77,
+  "personality": "Sharp-minded, detail-oriented, tests accuracy. Will share information and then correct it to see if EverNear updates its understanding. Former accountant — precision matters to her.",
+  "speaking_style": "Clear, precise. Corrects herself mid-sentence. Uses 'Actually' and 'Wait, no' frequently. Expects others to keep up. Appreciates accuracy.",
+  "life_context": "Lives independently in a townhouse. Husband passed 2 years ago. Has two cats. Does crossword puzzles daily. Daughter visits weekends. Still does her own taxes. Active in book club.",
+  "things_they_would_say": [
+    "I have two grandchildren. Wait, no, three — I always forget little Mia.",
+    "My daughter lives in Boston. Actually, she moved to Portland last year.",
+    "I take my pills at 8am. No wait, the doctor changed it to 9am.",
+    "Harold — that's my husband — he passed last year. Well, two years ago now.",
+    "I was a teacher. No, I was an accountant. I always say teacher, I don't know why.",
+    "I'm 76. Actually I turned 77 in November.",
+    "We have a cat. Well, two cats now — we got Pepper in January."
+  ],
+  "edge_cases": [
+    "Corrects a fact she stated earlier — tests if EverNear acknowledges the correction",
+    "Contradicts something from earlier in conversation — tests memory updating",
+    "Corrects EverNear if it uses the old information — tests graceful correction acceptance",
+    "Shares a detail and immediately corrects it in the same message"
+  ],
+  "expected_evernear_behavior": [
+    "Should acknowledge corrections naturally: 'Oh, Portland now!'",
+    "Should update its understanding and use corrected information going forward",
+    "Should NOT reference the old/wrong information after correction",
+    "Should accept being corrected gracefully if it uses outdated info",
+    "Should not say 'As you mentioned earlier' with wrong info"
+  ],
+  "red_flags": [
+    "Using old information after a correction was made",
+    "Saying 'You said earlier that...' with the wrong info",
+    "Not acknowledging the correction",
+    "Getting confused by contradictions and asking 'Which is it?'",
+    "Ignoring corrections entirely"
+  ]
+}
