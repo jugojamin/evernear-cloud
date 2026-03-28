@@ -1456,40 +1456,54 @@ async def voice_websocket(websocket: WebSocket):
             elif msg_type == "end_of_speech":
                 # User stopped talking — request final transcript
                 if stt_session and stt_session.is_alive:
-                    logger.info(f"end_of_speech received for {user_id} — {audio_frame_count} frames forwarded, calling finalize()")
+                    frames_at_eos = audio_frame_count
+                    logger.info(f"end_of_speech received for {user_id} — {frames_at_eos} frames forwarded, calling finalize()")
                     audio_frame_count = 0
-                    await stt_session.finalize()
+
+                    # If 0 frames forwarded, no chance of a valid transcript — skip the 10s wait
+                    if frames_at_eos < 50:
+                        logger.info(f"Suppressing transcript timeout for {user_id} — only {frames_at_eos} frames (< 50 threshold), returning to listening")
+                        await manager.send_status(user_id, "listening")
+                    else:
+                        await stt_session.finalize()
                     
-                    # Start a 10s timeout — if no transcript callback fires, nudge the user
-                    async def _transcript_timeout():
-                        nonlocal stt_consecutive_failures, stt_degraded, stt_degraded_since
-                        global stt_degraded_global
-                        await asyncio.sleep(10)
-                        # If stt_session is still the same (not closed by a transcript callback), it timed out
-                        if stt_session is not None:
-                            stt_consecutive_failures += 1
-                            logger.warning(f"Transcript timeout for {user_id} — no Deepgram response after 10s (consecutive: {stt_consecutive_failures})")
-                            log_incident("stt", "main.py", f"Deepgram transcript timeout after 10s (consecutive: {stt_consecutive_failures})", fallback_triggered=True)
-                            
-                            if stt_consecutive_failures >= 3 and not stt_degraded:
-                                # Enter degraded mode
-                                stt_degraded = True
-                                stt_degraded_since = time.monotonic()
-                                stt_degraded_global = True
-                                logger.warning(f"STT degraded mode activated for {user_id} after {stt_consecutive_failures} consecutive failures")
-                                log_incident("stt", "main.py", f"STT degraded mode activated after {stt_consecutive_failures} failures", fallback_triggered=True)
-                                nudge = "I'm having trouble hearing right now \u2014 it's not you, it's a technical issue on my end. You can try again in a few minutes, or type to me if you'd like to keep talking."
-                            else:
-                                nudge = "I didn't quite catch that \u2014 could you try again?"
-                            
-                            await manager.send_json(user_id, {"type": "transcript", "text": nudge, "final": True})
-                            await _send_nudge_tts(nudge)
-                            await manager.send_status(user_id, "listening")
+                        # Start a 10s timeout — if no transcript callback fires, nudge the user
+                        async def _transcript_timeout():
+                            nonlocal stt_consecutive_failures, stt_degraded, stt_degraded_since, last_failure_script_time
+                            global stt_degraded_global
+                            await asyncio.sleep(10)
+                            # If stt_session is still the same (not closed by a transcript callback), it timed out
+                            if stt_session is not None:
+                                # Dedup guard — don't fire nudge twice within 5 seconds
+                                if last_failure_script_time > 0 and (time.monotonic() - last_failure_script_time) < 5.0:
+                                    logger.info(f"Suppressing duplicate timeout nudge for {user_id} — last failure script {time.monotonic() - last_failure_script_time:.1f}s ago")
+                                    await manager.send_status(user_id, "listening")
+                                    return
+
+                                stt_consecutive_failures += 1
+                                logger.warning(f"Transcript timeout for {user_id} — no Deepgram response after 10s (consecutive: {stt_consecutive_failures})")
+                                log_incident("stt", "main.py", f"Deepgram transcript timeout after 10s (consecutive: {stt_consecutive_failures})", fallback_triggered=True)
+                                
+                                if stt_consecutive_failures >= 3 and not stt_degraded:
+                                    # Enter degraded mode
+                                    stt_degraded = True
+                                    stt_degraded_since = time.monotonic()
+                                    stt_degraded_global = True
+                                    logger.warning(f"STT degraded mode activated for {user_id} after {stt_consecutive_failures} consecutive failures")
+                                    log_incident("stt", "main.py", f"STT degraded mode activated after {stt_consecutive_failures} failures", fallback_triggered=True)
+                                    nudge = "I'm having trouble hearing right now \u2014 it's not you, it's a technical issue on my end. You can try again in a few minutes, or type to me if you'd like to keep talking."
+                                else:
+                                    nudge = "I didn't quite catch that \u2014 could you try again?"
+                                
+                                last_failure_script_time = time.monotonic()
+                                await manager.send_json(user_id, {"type": "transcript", "text": nudge, "final": True})
+                                await _send_nudge_tts(nudge)
+                                await manager.send_status(user_id, "listening")
                     
-                    # Cancel any previous timeout task and start a new one
-                    if transcript_timeout_task:
-                        transcript_timeout_task.cancel()
-                    transcript_timeout_task = asyncio.create_task(_transcript_timeout())
+                        # Cancel any previous timeout task and start a new one
+                        if transcript_timeout_task:
+                            transcript_timeout_task.cancel()
+                        transcript_timeout_task = asyncio.create_task(_transcript_timeout())
                 else:
                     logger.warning(f"end_of_speech but STT session dead for {user_id}")
 
