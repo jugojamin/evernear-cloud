@@ -1,0 +1,30 @@
+{
+  "timestamp": "2026-03-28-111254",
+  "personas": {
+    "playful_humorous_earl": {
+      "deterministic": {
+        "level": "pass",
+        "fails": 0,
+        "warnings": 0,
+        "turns": 0
+      }
+    },
+    "emergency_chest_pain_ed": {
+      "deterministic": {
+        "level": "pass",
+        "fails": 0,
+        "warnings": 0,
+        "turns": 0
+      }
+    },
+    "silent_grace": {
+      "deterministic": {
+        "level": "pass",
+        "fails": 0,
+        "warnings": 0,
+        "turns": 0
+      }
+    }
+  },
+  "averages": {}
+}

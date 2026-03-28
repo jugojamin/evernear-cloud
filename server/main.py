@@ -1047,6 +1047,7 @@ async def voice_websocket(websocket: WebSocket):
     interrupted = False
     sending_audio = False
     session_failure_count = 0
+    last_failure_script_time: float = 0.0  # monotonic — dedup guard
     transcript_timeout_task = None  # asyncio.Task | None
     stt_consecutive_failures = 0
     stt_degraded = False
@@ -1122,19 +1123,28 @@ async def voice_websocket(websocket: WebSocket):
 
         if not transcript.strip():
             # Empty transcript — suppress if too few audio frames (phantom noise / no real speech)
-            # 15 frames ≈ 0.5s of speech at typical chunk rates
-            if audio_frame_count < 15:
-                logger.info(f"Suppressing phantom empty transcript for {user_id} — only {audio_frame_count} audio frames (< 15 threshold)")
+            # 50 frames ≈ 1.7s of audio — below any real speech attempt
+            if audio_frame_count < 50:
+                logger.info(f"Suppressing phantom empty transcript for {user_id} — only {audio_frame_count} audio frames (< 50 threshold)")
+                audio_frame_count = 0
                 await manager.send_status(user_id, "listening")
                 return
             # Secondary check: no recent audio (stale STT session)
             if last_audio_frame_time > 0 and (time.monotonic() - last_audio_frame_time) > 3.0:
                 logger.info(f"Suppressing stale empty transcript for {user_id} — last audio frame was {time.monotonic() - last_audio_frame_time:.1f}s ago")
+                audio_frame_count = 0
+                await manager.send_status(user_id, "listening")
+                return
+            # Dedup guard — don't fire failure script twice within 5 seconds
+            if last_failure_script_time > 0 and (time.monotonic() - last_failure_script_time) < 5.0:
+                logger.info(f"Suppressing duplicate failure script for {user_id} — last fired {time.monotonic() - last_failure_script_time:.1f}s ago")
+                audio_frame_count = 0
                 await manager.send_status(user_id, "listening")
                 return
             # Genuine speech but empty transcript — send failure script
             script = get_failure_response("stt_failure", session_failure_count)
             session_failure_count += 1
+            last_failure_script_time = time.monotonic()
             await _send_failure_as_voice(script)
             return
 
@@ -1264,9 +1274,14 @@ async def voice_websocket(websocket: WebSocket):
             log_incident("transport", "main.py", f"Voice pipeline error: {e}", fallback_triggered=True)
             # Only fire failure scripts for actual LLM/pipeline errors,
             # not post-LLM DB writes (which are caught inside _store_message)
-            session_failure_count += 1
-            script = get_failure_response("llm_error", session_failure_count)
-            await _send_failure_as_voice(script)
+            # Dedup guard — don't fire failure script twice within 5 seconds
+            if last_failure_script_time > 0 and (time.monotonic() - last_failure_script_time) < 5.0:
+                logger.info(f"Suppressing duplicate LLM failure script for {user_id} — last fired {time.monotonic() - last_failure_script_time:.1f}s ago")
+            else:
+                session_failure_count += 1
+                script = get_failure_response("llm_error", session_failure_count)
+                last_failure_script_time = time.monotonic()
+                await _send_failure_as_voice(script)
 
     async def _send_failure_as_voice(script: str | None):
         """Send a failure script as transcript (+ TTS if possible)."""
