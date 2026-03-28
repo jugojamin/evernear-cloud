@@ -157,8 +157,18 @@ class TTSRouter:
     async def synthesize(
         self, text: str, voice_id: str, ctx: TTSRoutingContext | None = None,
     ) -> AsyncIterator[bytes]:
-        """Synthesize text with the appropriate provider."""
+        """Synthesize text with the appropriate provider, falling back on failure."""
         provider = self.select_provider(ctx or TTSRoutingContext())
+        fallback = self.standard if self.standard is not provider else None
         logger.info(f"TTS routing to {provider.name}")
-        async for chunk in provider.synthesize(text, voice_id):
+        try:
+            async for chunk in provider.synthesize(text, voice_id):
+                yield chunk
+            return  # success — no fallback needed
+        except Exception as e:
+            if not fallback:
+                raise
+            logger.warning(f"TTS_FALLBACK: primary={provider.name} failed ({type(e).__name__}: {e}), falling back to {fallback.name}")
+        # Fallback provider — if this also fails, exception propagates normally
+        async for chunk in fallback.synthesize(text, voice_id):
             yield chunk
