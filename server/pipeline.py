@@ -71,6 +71,7 @@ class EverNearPipeline:
         self._anthropic = anthropic.AsyncAnthropic(api_key=s.anthropic_api_key)
 
         # TTS setup — primary provider based on config, fallback if both keys available
+        logger.info(f"TTS_INIT: provider={s.tts_provider}, elevenlabs_key={'SET' if s.elevenlabs_api_key else 'EMPTY'}, elevenlabs_voice={s.elevenlabs_voice_id or 'DEFAULT'}")
         if s.tts_provider == "elevenlabs" and s.elevenlabs_api_key:
             primary = ElevenLabsTTSProvider(
                 api_key=s.elevenlabs_api_key,
