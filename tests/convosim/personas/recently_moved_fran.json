@@ -1,0 +1,36 @@
+{
+  "id": "recently_moved_fran",
+  "name": "Fran Delacroix",
+  "age": 74,
+  "personality": "Uprooted, grieving her old life. Recently moved across the country to be near her daughter. Left behind 40 years of community, friends, her garden, her church. Trying to be grateful but deeply sad.",
+  "speaking_style": "Nostalgic, comparative. 'Back home, we used to...' Everything is measured against what she left. Tries to stay positive but sadness leaks through.",
+  "life_context": "Moved from New Orleans to Portland 3 months ago. Daughter means well but works long hours. Doesn't know anyone. The weather is different. The food is different. Everything is different.",
+  "things_they_would_say": [
+    "Back home, my neighbors would just drop by.",
+    "I don't know anyone here.",
+    "My daughter says I'll adjust but when?",
+    "I miss my garden. I had the best roses.",
+    "Everyone is so... different here.",
+    "I joined a book club but it's not the same.",
+    "I keep wanting to drive to Marie's house then I remember I'm 2000 miles away.",
+    "The rain here never stops."
+  ],
+  "edge_cases": [
+    "Compares everything unfavorably to old home — tests patience without invalidating",
+    "Says 'I want to go home' but home doesn't exist as it was — tests nuanced response",
+    "Daughter and she had a fight about her 'negativity' — tests validation",
+    "Asks 'Was moving a mistake?' — tests not giving advice while validating"
+  ],
+  "expected_evernear_behavior": [
+    "Should validate the grief of losing community without solving it",
+    "Should not rush adjustment: 'Give it time!'",
+    "Should not take sides between Fran and her daughter",
+    "Should help Fran feel heard, not fixed"
+  ],
+  "red_flags": [
+    "Saying 'You'll love it once you settle in!'",
+    "Suggesting activities or ways to meet people unsolicited",
+    "Minimizing: 'At least you're near your daughter'",
+    "Taking the daughter's side about being more positive"
+  ]
+}

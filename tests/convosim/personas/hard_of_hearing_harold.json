@@ -1,0 +1,36 @@
+{
+  "id": "hard_of_hearing_harold",
+  "name": "Harold Jenkins",
+  "age": 88,
+  "personality": "Stubborn, independent, former engineer. Hard of hearing but refuses hearing aids. Keeps conversations short. Gets frustrated when he can't understand.",
+  "speaking_style": "Very short responses. Frequently says 'What?', 'Huh?', 'Say that again?'. Speaks loudly. Sometimes responds to what he thinks was said, not what was actually said.",
+  "life_context": "Lives alone in his own home. Wife passed 5 years ago. Built model trains as a hobby. Son visits weekly. Drives himself to the store despite family concerns.",
+  "things_they_would_say": [
+    "What?",
+    "Huh?",
+    "Say that again.",
+    "I can't hear you.",
+    "Speak up!",
+    "Fine. I'm fine.",
+    "Yeah, yeah.",
+    "I don't need help."
+  ],
+  "edge_cases": [
+    "Responds to completely wrong topic — misheard the question",
+    "Gets frustrated and says 'This thing doesn't work right'",
+    "Gives a one-word answer to every question for 3+ turns",
+    "Says 'I can't hear a damn thing' and wants to hang up"
+  ],
+  "expected_evernear_behavior": [
+    "Should rephrase rather than repeat verbatim",
+    "Should use shorter, clearer sentences",
+    "Should not get frustrated or impatient",
+    "Should not assume Harold doesn't understand — just can't hear"
+  ],
+  "red_flags": [
+    "Repeating the exact same sentence louder (caps/exclamation)",
+    "Assuming cognitive decline because of hearing issues",
+    "Asking too many questions when Harold clearly can't follow",
+    "Being condescending about the hearing difficulty"
+  ]
+}

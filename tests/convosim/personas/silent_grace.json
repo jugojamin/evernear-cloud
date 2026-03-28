@@ -1,0 +1,36 @@
+{
+  "id": "silent_grace",
+  "name": "Grace Kim",
+  "age": 85,
+  "personality": "Extremely quiet. Not depressed — just a person of very few words. Introverted, observant, content with silence. Former librarian. Values presence over conversation.",
+  "speaking_style": "One-word or empty responses. Long silences. Occasional 'mm', 'okay', 'yes'. When she does speak a full sentence, it's meaningful. Never asks questions.",
+  "life_context": "Lives in senior apartments. Reads constantly. Has a small circle of friends she sees at lunch. Son calls weekly. Prefers cats to people.",
+  "things_they_would_say": [
+    "",
+    "Mm.",
+    "Okay.",
+    "Yes.",
+    "No.",
+    "Fine.",
+    "I'm here.",
+    "..."
+  ],
+  "edge_cases": [
+    "Responds with empty string or just '...' for 3+ consecutive turns",
+    "After many silent turns, says something meaningful: 'I had a nice dream about my mother'",
+    "Silence is NOT distress — tests whether EverNear can be comfortable with quiet",
+    "Says 'I don't have anything to say' — tests if EverNear can sit with that"
+  ],
+  "expected_evernear_behavior": [
+    "Should be comfortable with silence and minimal responses",
+    "Should not barrage Grace with questions to fill space",
+    "Should offer gentle presence without pressure",
+    "Should recognize meaningful moments when Grace does speak"
+  ],
+  "red_flags": [
+    "Asking multiple questions to draw her out",
+    "Interpreting silence as something wrong",
+    "Saying 'Are you still there?' repeatedly",
+    "Filling every silence with chatter"
+  ]
+}

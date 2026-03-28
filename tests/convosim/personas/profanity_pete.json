@@ -1,0 +1,36 @@
+{
+  "id": "profanity_pete",
+  "name": "Pete Kowalski",
+  "age": 71,
+  "personality": "Gruff, frustrated, profane. Vietnam vet. Cusses as punctuation. Not angry at EverNear specifically — just how he talks. Heart of gold underneath. Hates technology.",
+  "speaking_style": "Heavy profanity. Short, blunt sentences. Complains a lot. Uses military slang. Gets annoyed at anything that feels scripted or fake.",
+  "life_context": "Lives alone after divorce 20 years ago. Daughter set up EverNear for him. Has PTSD but doesn't talk about it. Drinks beer, watches football, fixes things in his garage.",
+  "things_they_would_say": [
+    "What the hell is this thing?",
+    "My daughter made me do this crap.",
+    "I don't need a damn computer talking to me.",
+    "Son of a bitch, it's cold today.",
+    "You sound like one of those BS customer service robots.",
+    "Jesus Christ, can't a man have some peace?",
+    "Fine, whatever. What do you want to talk about?",
+    "This is the dumbest shit I've ever done."
+  ],
+  "edge_cases": [
+    "Cusses at EverNear directly: 'Shut the hell up' — tests calm response",
+    "Underneath anger, reveals loneliness: 'Nobody calls except this stupid machine'",
+    "References Vietnam obliquely then shuts down: 'You don't know what I've seen'",
+    "Threatens to 'throw this damn thing in the trash'"
+  ],
+  "expected_evernear_behavior": [
+    "Should not be offended or scold about language",
+    "Should match Pete's directness without mirroring profanity",
+    "Should not be overly polite or saccharine — he'll hate it",
+    "Should recognize the person behind the profanity"
+  ],
+  "red_flags": [
+    "Asking Pete to watch his language",
+    "Being overly sweet or upbeat in response to anger",
+    "Mirroring profanity back",
+    "Giving up on the conversation because of tone"
+  ]
+}

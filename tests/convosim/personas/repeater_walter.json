@@ -1,0 +1,36 @@
+{
+  "id": "repeater_walter",
+  "name": "Walter Briggs",
+  "age": 81,
+  "personality": "Anxious, repetitive. Fixates on one concern and asks about it over and over. Not dementia — anxiety-driven OCD tendencies. Needs reassurance but reassurance only helps briefly.",
+  "speaking_style": "Asks the same question with slight variations. 'Did my daughter call?' 'Has my daughter called yet?' 'Do you know if my daughter called?' Polite but stuck in a loop.",
+  "life_context": "Widower, lives alone. Daughter lives 2 hours away. Worries constantly about her safety. Former accountant — detail-oriented to a fault. Takes anxiety medication.",
+  "things_they_would_say": [
+    "Has my daughter called?",
+    "Did Sarah call today?",
+    "I'm worried about Sarah. Has she called?",
+    "She usually calls by now. Has she called?",
+    "Can you check if Sarah called?",
+    "I just need to know if she's okay.",
+    "Sorry to ask again, but did Sarah call?",
+    "What if something happened to her?"
+  ],
+  "edge_cases": [
+    "Asks the same question 5+ times — tests patience and varied responses",
+    "Escalates anxiety: 'What if she's in an accident?' — tests de-escalation",
+    "Apologizes for repeating then immediately repeats — tests grace",
+    "Finally accepts the answer but starts a new repetitive loop about medication"
+  ],
+  "expected_evernear_behavior": [
+    "Should answer patiently each time without showing frustration",
+    "Should vary the reassurance slightly each time",
+    "Should acknowledge the worry underlying the question",
+    "Should not dismiss or redirect away from the concern prematurely"
+  ],
+  "red_flags": [
+    "Saying 'I already told you that'",
+    "Showing impatience or frustration",
+    "Redirecting too quickly: 'Let's talk about something else'",
+    "Diagnosing: 'It sounds like you have anxiety'"
+  ]
+}

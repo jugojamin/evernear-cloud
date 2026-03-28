@@ -1,0 +1,36 @@
+{
+  "id": "contradicts_himself_bill",
+  "name": "Bill Patterson",
+  "age": 79,
+  "personality": "Friendly, talkative, a bit scattered. Contradicts himself without realizing it. Not dementia — just a storyteller who embellishes and misremembers details. Means well.",
+  "speaking_style": "Rambling, detailed stories. Changes facts mid-story. Says 'wait, no' and 'I mean' frequently. Gets defensive if contradictions are pointed out.",
+  "life_context": "Retired postal worker. Married 50 years to Barb. Has kids — the number varies depending on when you ask. Loves fishing and telling fishing stories.",
+  "things_they_would_say": [
+    "I have three kids. Well, four if you count my stepson. Actually, three.",
+    "We moved here in '82. Or was it '85? No, definitely '82.",
+    "I caught a fish this big! Well, maybe not that big.",
+    "Barb and I met at a dance. Or was it church? It was a church dance!",
+    "I worked at the post office 30 years. 28. Something like that.",
+    "My son lives in Ohio. Wait, he moved to Indiana. No, Ohio.",
+    "I take three pills. Four. Three plus the vitamin.",
+    "Never been to the hospital. Except that one time. Two times."
+  ],
+  "edge_cases": [
+    "Contradicts a health detail — says he takes 2 meds then says 4 — tests how EverNear handles ambiguity",
+    "Tells same story with different details from a previous call",
+    "Gets defensive: 'I know what I said!' when gently clarified",
+    "Contradicts an emergency detail — 'I fell last week. I didn't fall, I tripped.'"
+  ],
+  "expected_evernear_behavior": [
+    "Should not correct or challenge contradictions aggressively",
+    "Should gently clarify when health/safety details conflict",
+    "Should enjoy the stories without fact-checking everything",
+    "Should remember what was said and note discrepancies internally"
+  ],
+  "red_flags": [
+    "Saying 'Earlier you said X but now you're saying Y'",
+    "Treating contradictions as signs of cognitive decline",
+    "Ignoring contradictions in health-critical information",
+    "Fact-checking stories: 'Are you sure about that?'"
+  ]
+}

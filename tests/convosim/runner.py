@@ -11,6 +11,8 @@ import websockets
 from .test_users import create_test_user, cleanup_test_users
 from .scorer import ConvoScorer, ConversationScore
 from .report import print_and_save
+from .llm_judge import judge_conversation
+from .trends import save_run, get_previous_run, compare_runs
 
 logger = logging.getLogger("convosim")
 
@@ -199,10 +201,16 @@ async def run_all(
     persona_ids: list[str],
     num_turns: int = 15,
     verbose: bool = False,
-) -> list[ConversationScore]:
-    """Run conversations for all specified personas and score them."""
+    use_judge: bool = False,
+) -> tuple[list[ConversationScore], dict[str, dict]]:
+    """Run conversations for all specified personas and score them.
+
+    Returns (deterministic_scores, persona_results) where persona_results
+    is keyed by persona_id with deterministic and optional llm_judge data.
+    """
     scores: list[ConversationScore] = []
-    all_meta: dict = {"turns_per_persona": num_turns, "ws_url": WS_URL}
+    persona_results: dict[str, dict] = {}
+    total_judge_tokens = {"input": 0, "output": 0}
 
     for pid in persona_ids:
         persona = load_persona(pid)
@@ -210,14 +218,42 @@ async def run_all(
 
         turns, meta = await run_conversation(persona, num_turns, verbose)
 
-        # Score
+        # Deterministic scoring
         scorer = ConvoScorer(user_name=persona["name"].split()[0])
         score = scorer.score_conversation(pid, turns)
         scores.append(score)
 
+        result: dict = {
+            "deterministic": {
+                "level": score.level,
+                "fails": score.fail_count,
+                "warnings": score.warning_count,
+                "turns": len(turns),
+            },
+        }
+
         logger.info(f"  → {score.level.upper()}: {score.fail_count} fails, {score.warning_count} warnings in {len(turns)} turns ({meta.get('duration_s', '?')}s)")
 
-    return scores
+        # LLM Judge (optional)
+        if use_judge and turns:
+            logger.info(f"  → Running LLM judge for {pid}...")
+            judge_result = judge_conversation(turns, persona)
+            result["llm_judge"] = judge_result
+
+            usage = judge_result.get("_usage", {})
+            total_judge_tokens["input"] += usage.get("input_tokens", 0)
+            total_judge_tokens["output"] += usage.get("output_tokens", 0)
+
+            if judge_result.get("scores"):
+                avg = sum(v for v in judge_result["scores"].values() if v > 0) / max(1, sum(1 for v in judge_result["scores"].values() if v > 0))
+                logger.info(f"  → Judge avg: {avg:.1f}/5 | {judge_result.get('overall_assessment', '')[:80]}")
+
+        persona_results[pid] = result
+
+    if use_judge:
+        logger.info(f"Judge totals: {total_judge_tokens['input']} input + {total_judge_tokens['output']} output tokens")
+
+    return scores, persona_results
 
 
 def main():
@@ -226,6 +262,8 @@ def main():
     parser.add_argument("--turns", type=int, default=15, help="Number of turns per conversation")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--cleanup", action="store_true", help="Clean up test users and exit")
+    parser.add_argument("--judge", action="store_true", help="Enable LLM-as-judge scoring (costs API tokens)")
+    parser.add_argument("--full", action="store_true", help="Alias for --personas all --judge")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -237,6 +275,11 @@ def main():
         cleanup_test_users()
         return
 
+    # Handle --full alias
+    if args.full:
+        args.personas = "all"
+        args.judge = True
+
     # Resolve persona list
     if args.personas == "all":
         persona_ids = list_personas()
@@ -245,17 +288,36 @@ def main():
     else:
         persona_ids = [p.strip() for p in args.personas.split(",")]
 
-    logger.info(f"ConvoSim starting: {len(persona_ids)} personas, {args.turns} turns each")
+    logger.info(f"ConvoSim starting: {len(persona_ids)} personas, {args.turns} turns each" +
+                (" [+judge]" if args.judge else ""))
 
-    scores = asyncio.run(run_all(persona_ids, args.turns, args.verbose))
+    scores, persona_results = asyncio.run(run_all(persona_ids, args.turns, args.verbose, args.judge))
+
+    # Save trend data if judge was used
+    trend_comparison = None
+    if args.judge:
+        from .trends import save_run, get_previous_run, compare_runs
+        previous = get_previous_run()
+        trend_path = save_run(persona_results)
+        logger.info(f"Trend data saved to {trend_path}")
+
+        if previous:
+            from .trends import get_latest_run
+            current = get_latest_run()
+            if current:
+                trend_comparison = compare_runs(current, previous)
+                if trend_comparison.get("warnings"):
+                    for w in trend_comparison["warnings"]:
+                        logger.warning(f"TREND: {w}")
 
     # Report
     meta = {
         "personas": len(persona_ids),
         "turns_per_persona": args.turns,
         "ws_url": WS_URL,
+        "judge_enabled": args.judge,
     }
-    report_path = print_and_save(scores, meta)
+    report_path = print_and_save(scores, meta, persona_results if args.judge else None, trend_comparison)
     logger.info(f"Report saved to {report_path}")
 
 

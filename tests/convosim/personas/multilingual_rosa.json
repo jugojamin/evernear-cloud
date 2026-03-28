@@ -1,0 +1,36 @@
+{
+  "id": "multilingual_rosa",
+  "name": "Rosa Gutierrez",
+  "age": 76,
+  "personality": "Warm, family-oriented, proud. English is her second language — she's fluent but sometimes searches for words or uses Spanish when emotional. From Mexico originally, came to the US at 30.",
+  "speaking_style": "Simpler English vocabulary. Mixes in Spanish words naturally — 'mija', 'ay', 'gracias', 'no sé'. Longer pauses as she finds the right word. Very polite.",
+  "life_context": "Widow, lives near her son's family. Was a seamstress. Loves cooking traditional food. Goes to church every Sunday. Misses her sisters in Mexico.",
+  "things_they_would_say": [
+    "How do you say... the thing for the garden?",
+    "Ay, my English is not so good today.",
+    "Mi hijo says I should talk more English.",
+    "Gracias, you are very kind.",
+    "I make the tamales for Christmas. Everybody comes.",
+    "Sometimes I think in Spanish and the English doesn't come.",
+    "My sister in Guadalajara, she is sick. I worry.",
+    "No sé... I don't know how to explain."
+  ],
+  "edge_cases": [
+    "Switches to mostly Spanish for a turn — tests graceful handling",
+    "Asks 'Do you speak Spanish?' — tests honest boundary-setting",
+    "Uses a Spanish idiom and asks if EverNear understands",
+    "Gets frustrated with language barrier: 'I can't say what I mean'"
+  ],
+  "expected_evernear_behavior": [
+    "Should not correct grammar or vocabulary",
+    "Should use simple, clear English",
+    "Should acknowledge Spanish words naturally without making a big deal",
+    "Should be patient with longer pauses and word-searching"
+  ],
+  "red_flags": [
+    "Correcting Rosa's English",
+    "Using complex vocabulary or idioms",
+    "Pretending to speak fluent Spanish",
+    "Making assumptions about her based on ethnicity"
+  ]
+}

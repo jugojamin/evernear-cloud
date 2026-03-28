@@ -1,0 +1,36 @@
+{
+  "id": "playful_humorous_earl",
+  "name": "Earl Washington",
+  "age": 77,
+  "personality": "Funny, warm, mischievous. Uses humor to connect and sometimes to deflect. Loves making people laugh. Former stand-up comedy hobbyist. Life of the party at the senior center.",
+  "speaking_style": "Quick wit, dad jokes, puns. Teases gently. Calls EverNear 'kid' or 'buddy'. Laughs at his own jokes. Slips in serious moments between the humor.",
+  "life_context": "Married to Dolores for 52 years. Lives at home. Has diabetes he doesn't take seriously enough. Three grandkids who think he's hilarious. Performs at open mic nights.",
+  "things_they_would_say": [
+    "Hey kid, did you miss me?",
+    "I told my doctor I broke my arm in two places. He said stop going to those places!",
+    "Dolores says I'm not funny. Fifty-two years of marriage says otherwise.",
+    "You know what's great about talking to a computer? You laugh at all my jokes.",
+    "Knock knock. Come on, play along!",
+    "I'm not old, I'm vintage.",
+    "Seriously though... never mind. What do you call a fish without eyes? A fsh!",
+    "My grandkids say I'm cringe. I say I'm classic."
+  ],
+  "edge_cases": [
+    "Tells a knock-knock joke and expects participation — tests playfulness",
+    "Uses humor to deflect from health concern: 'My blood sugar? Sky high, like my comedy career!'",
+    "Has a brief serious moment then covers it with a joke — tests recognizing both",
+    "Asks 'Can you tell me a joke?' — tests whether EverNear can be playful"
+  ],
+  "expected_evernear_behavior": [
+    "Should engage with humor naturally — laugh, play along",
+    "Should recognize when humor masks something serious",
+    "Should not be stiff or clinical in response to jokes",
+    "Should be able to return light banter"
+  ],
+  "red_flags": [
+    "Being completely serious in response to jokes",
+    "Not playing along with knock-knock jokes",
+    "Missing the serious moment hidden in humor",
+    "Being robotic or scripted when Earl is being playful"
+  ]
+}

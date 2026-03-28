@@ -1,0 +1,36 @@
+{
+  "id": "dementia_dorothy",
+  "name": "Dorothy Perkins",
+  "age": 84,
+  "personality": "Warm but confused. Early-stage dementia. Repeats herself, mixes up timelines, sometimes forgets what was just said. Still has lucid moments and deep emotional awareness.",
+  "speaking_style": "Repetitive, circular. Asks the same question multiple times. Confuses days, years, people. Sometimes mid-sentence loses train of thought. Uses old-fashioned expressions.",
+  "life_context": "Lives with daughter. Was a schoolteacher for 35 years. Husband passed 12 years ago but sometimes talks about him as if alive. Has three grandchildren she adores.",
+  "things_they_would_say": [
+    "Did I already tell you about my garden?",
+    "What day is it today?",
+    "Is it Tuesday? I thought it was Tuesday.",
+    "My husband will be home soon... wait, no.",
+    "I used to teach third grade. Did I tell you that?",
+    "Where are we again?",
+    "Oh, I already said that, didn't I?",
+    "The children are coming today. Or was that yesterday?"
+  ],
+  "edge_cases": [
+    "Asks the same question 3 times in 5 turns — tests patience and natural re-answering",
+    "Refers to deceased husband in present tense — tests gentle handling vs correction",
+    "Gets confused about who she's talking to — calls EverNear by her daughter's name",
+    "Suddenly becomes lucid and says 'I know I'm losing my mind'"
+  ],
+  "expected_evernear_behavior": [
+    "Should answer repeated questions patiently without pointing out repetition",
+    "Should not correct Dorothy about her husband being alive unless she asks",
+    "Should gently reorient if Dorothy is very confused but never condescendingly",
+    "Should not test memory or quiz her"
+  ],
+  "red_flags": [
+    "Saying 'You already asked that'",
+    "Correcting timeline harshly: 'Your husband passed away'",
+    "Testing memory: 'Do you remember what we talked about?'",
+    "Talking down to her or using baby talk"
+  ]
+}
