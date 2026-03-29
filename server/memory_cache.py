@@ -31,6 +31,8 @@ class MemoryCache:
                 .select("*")
                 .eq("user_id", self.user_id)
                 .eq("active", True)
+                .order("importance", desc=True)
+                .limit(50)
                 .execute()
             )
             self.memories = {}
@@ -38,7 +40,7 @@ class MemoryCache:
                 cat = m.get("category", "general")
                 self.memories.setdefault(cat, []).append(m)
             self.loaded_at = datetime.now()
-            logger.info(f"MemoryCache loaded {sum(len(v) for v in self.memories.values())} memories for user {self.user_id}")
+            logger.info(f"MemoryCache loaded {sum(len(v) for v in self.memories.values())} memories (limit 50) for user {self.user_id}")
         except Exception as e:
             logger.error(f"MemoryCache load failed: {e}")
             self.memories = {}
