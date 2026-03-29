@@ -290,7 +290,7 @@ async def process_turn_memories(
         return []
 
 
-def get_user_memories(user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+def get_user_memories(user_id: str, limit: int = 20) -> list[dict[str, Any]]:
     """Fetch active memories for a user, ordered by combined importance + recency score."""
     db = get_service_client()
     # Fetch more than limit to allow re-ranking
