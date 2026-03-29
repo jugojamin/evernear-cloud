@@ -1056,6 +1056,10 @@ async def voice_websocket(websocket: WebSocket):
     audio_codec = "pcm"  # "pcm" or "opus" — set by client in session_start
     last_audio_frame_time: float = 0.0  # monotonic timestamp of last audio frame
 
+    # Fragment accumulation — hold incomplete transcripts briefly
+    pending_fragment: str | None = None
+    fragment_timeout_task: asyncio.Task | None = None
+
     # Latency instrumentation timestamps
     t_session_start_received: float = 0.0
     t_stt_init_complete: float = 0.0
@@ -1084,12 +1088,66 @@ async def voice_websocket(websocket: WebSocket):
         except Exception as tts_err:
             logger.error(f"TTS nudge failed: {tts_err}")
 
+    # Words that signal an incomplete transcript when they appear at the end
+    _INCOMPLETE_ENDINGS = {
+        # conjunctions
+        "and", "but", "or", "so", "because", "since", "when", "while", "if", "that", "which", "who",
+        # prepositions
+        "to", "for", "with", "from", "in", "on", "at", "of", "about", "through", "by",
+        # articles
+        "a", "an", "the",
+    }
+
+    def _looks_incomplete(text: str) -> bool:
+        """Return True if transcript looks like an incomplete sentence fragment."""
+        stripped = text.strip().rstrip(".,!?")
+        if not stripped:
+            return False
+        last_word = stripped.split()[-1].lower()
+        if last_word in _INCOMPLETE_ENDINGS:
+            return True
+        words = stripped.split()
+        if len(words) < 3 and not text.strip().endswith((".", "!", "?")):
+            return True
+        return False
+
     async def _handle_voice_response(transcript: str):
         """Process a final STT transcript through the voice pipeline."""
         nonlocal interrupted, sending_audio, session_failure_count, stt_session
         nonlocal transcript_timeout_task, stt_consecutive_failures, stt_degraded, stt_degraded_since
         nonlocal t_first_audio_frame
+        nonlocal pending_fragment, fragment_timeout_task
         global stt_degraded_global
+
+        # --- Fragment accumulation ---
+        # If there's a pending fragment, join it with the new transcript
+        if pending_fragment is not None:
+            if fragment_timeout_task:
+                fragment_timeout_task.cancel()
+                fragment_timeout_task = None
+            combined = pending_fragment + " " + transcript.strip()
+            logger.info(f'FRAGMENT_JOINED: "{combined}" (held "{pending_fragment}" + received "{transcript.strip()}")')
+            pending_fragment = None
+            transcript = combined
+
+        # Check if this transcript looks incomplete — hold it
+        if _looks_incomplete(transcript):
+            pending_fragment = transcript.strip()
+            logger.info(f'FRAGMENT_HELD: "{pending_fragment}"')
+
+            async def _fragment_timeout():
+                nonlocal pending_fragment, fragment_timeout_task
+                await asyncio.sleep(3)
+                if pending_fragment is not None:
+                    frag = pending_fragment
+                    pending_fragment = None
+                    fragment_timeout_task = None
+                    logger.info(f'FRAGMENT_TIMEOUT: processing held fragment "{frag}" after 3s')
+                    await _handle_voice_response(frag)
+
+            fragment_timeout_task = asyncio.create_task(_fragment_timeout())
+            # Don't close STT or cancel timeout — we're waiting for more
+            return
 
         t_transcript_received = time.monotonic()
 
